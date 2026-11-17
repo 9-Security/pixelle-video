@@ -117,12 +117,16 @@ _COMMON_RULES = """# Output Rules
 2. Characters: define at most {max_characters} recurring characters. Each "appearance" must be a complete,
    self-contained English description (species or gender, age, body shape, hair, outfit, colors,
    distinctive features) so the same character can be redrawn identically in every scene.
+   Each character has TWO names that refer to the same character:
+   - "display_name": the name spoken in narration, in the narration language (e.g. 皮皮 for Chinese input).
+   - "name": a short ASCII romanization of display_name used only in English fields (e.g. Pipi).
+   Narration MUST call each character only by its exact "display_name" (never "name", never a nickname).
    If the story has no characters (e.g. landscapes), return an empty list.
 3. Scenes: each scene is one shot.
    - "narration": voice-over text, {min_words}~{max_words} words, natural spoken rhythm, no ending punctuation.
    - "visual": English, 20~50 words, describe setting, what characters are doing, composition, lighting.
-     Refer to characters ONLY by their exact "name"; do NOT repeat their appearance here.
-   - "characters": the list of character names visible in this shot (exact names from the character list).
+     Refer to characters ONLY by their exact ASCII "name"; do NOT repeat their appearance here.
+   - "characters": the ASCII "name" of every character visible in this shot.
    - "motion": English, 5~20 words, the movement happening in the shot (for AI video models).
    - "camera": one of static, zoom_in, zoom_out, pan_left, pan_right, pan_up, pan_down.
      Vary the camera across scenes to keep the animation dynamic.
@@ -214,10 +218,28 @@ def _character_anchors(
     return anchors
 
 
+def composition_hint(width: Optional[int], height: Optional[int]) -> str:
+    """
+    Framing hint derived from the output aspect ratio.
+
+    Some models (e.g. FLUX.1 schnell on Workers AI) only output square images
+    that are later center-cropped, so the subject should stay centered.
+    """
+    if not width or not height:
+        return ""
+    ratio = width / float(height)
+    if ratio < 0.85:
+        return "vertical portrait composition, main subject centered in the middle of the frame"
+    if ratio > 1.2:
+        return "wide cinematic composition, main subject centered"
+    return ""
+
+
 def build_scene_image_prompt(
     scene: AnimationScene,
     characters: Iterable[AnimationCharacter],
     style_prompt: str,
+    composition: str = "",
 ) -> str:
     """
     Compose the final text-to-image prompt for one scene.
@@ -230,6 +252,8 @@ def build_scene_image_prompt(
     anchors = _character_anchors(scene, characters)
     if anchors:
         parts.append("Characters: " + "; ".join(anchors))
+    if composition:
+        parts.append(composition)
     parts.append("consistent character design, no text, no watermark")
     return ", ".join(p for p in parts if p)
 
@@ -238,9 +262,10 @@ def build_scene_video_prompt(
     scene: AnimationScene,
     characters: Iterable[AnimationCharacter],
     style_prompt: str,
+    composition: str = "",
 ) -> str:
     """Compose the text-to-video prompt: image prompt plus motion and camera hints."""
-    base = build_scene_image_prompt(scene, characters, style_prompt)
+    base = build_scene_image_prompt(scene, characters, style_prompt, composition)
     extras = []
     if scene.motion:
         extras.append(f"Motion: {scene.motion.strip()}")

@@ -328,3 +328,61 @@ async def test_script_llm_fails_fast_on_client_errors(monkeypatch):
     monkeypatch.setattr(pipeline, "llm", flaky)
     assert (await pipeline._call_script_llm("prompt")).title == "Little Fox"
     assert calls["n"] == 3
+
+
+# ---------------------------------------------------------------- names & composition
+
+def test_narration_uses_display_names():
+    from pixelle_video.pipelines.animation import AnimationPipeline
+
+    script = AnimationScript(
+        title="t",
+        characters=[
+            AnimationCharacter(name="Pipi", display_name="皮皮", appearance="orange fox"),
+            AnimationCharacter(name="Lumi", appearance="firefly"),  # no display_name -> falls back
+        ],
+        scenes=[
+            AnimationScene(narration="Pipi 和 PIPI 看著月亮，Lumi 飛過來", visual="Pipi sits",
+                           characters=["Pipi", "Lumi"]),
+            AnimationScene(narration="Pipiland is not a name match", visual="x"),
+        ],
+    )
+    normalized = AnimationPipeline._normalize_script(script, n_scenes=5, mode="generate")
+    assert normalized.scenes[0].narration == "皮皮 和 皮皮 看著月亮，Lumi 飛過來"
+    assert normalized.scenes[1].narration == "Pipiland is not a name match"
+    assert normalized.characters[1].display_name == "Lumi"
+    # Visual prompts keep ASCII names so image models are not fed CJK text
+    prompt = build_scene_image_prompt(normalized.scenes[0], normalized.characters, "S")
+    assert "Pipi (orange fox)" in prompt and "皮皮" not in prompt
+
+
+def test_script_prompt_requires_display_name():
+    p = build_animation_script_prompt("a fox", n_scenes=3)
+    assert '"display_name"' in p and "ASCII" in p
+
+
+def test_composition_hint():
+    from pixelle_video.prompts.animation_script import composition_hint
+
+    assert "vertical" in composition_hint(576, 1024)
+    assert "wide" in composition_hint(1024, 576)
+    assert composition_hint(512, 512) == ""
+    assert composition_hint(None, 10) == ""
+    prompt = build_scene_image_prompt(_script().scenes[0], _script().characters, "S",
+                                      composition_hint(576, 1024))
+    assert "vertical portrait composition" in prompt
+
+
+@pytest.mark.parametrize("template,size", [
+    ("1080x1920/video_fullscreen.html", (576, 1024)),
+    ("1920x1080/video_fullscreen.html", (1024, 576)),
+])
+def test_fullscreen_templates(template, size):
+    from pixelle_video.services.frame_html import HTMLFrameGenerator
+    from pixelle_video.utils.template_util import get_template_type, resolve_template_path
+
+    assert get_template_type(template) == "video"
+    generator = HTMLFrameGenerator(resolve_template_path(template))
+    assert generator.get_media_size() == size
+    params = generator.parse_template_parameters()
+    assert {"title_size", "subtitle_size", "accent_color"} <= set(params)

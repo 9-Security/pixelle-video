@@ -32,6 +32,7 @@ Workflow:
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -46,6 +47,7 @@ from pixelle_video.prompts.animation_script import (
     build_animation_script_prompt,
     build_scene_image_prompt,
     build_scene_video_prompt,
+    composition_hint,
     get_style_prompt,
 )
 from pixelle_video.services.video import VideoService
@@ -54,7 +56,7 @@ from pixelle_video.utils.template_util import get_template_type
 
 MOTION_MODES = ("camera", "ai_video")
 SCRIPT_MODES = ("generate", "adapt")
-DEFAULT_TEMPLATE = "1080x1920/video_default.html"
+DEFAULT_TEMPLATE = "1080x1920/video_fullscreen.html"
 MAX_SCENES = 30
 # Text baked into image templates moves with the camera, so keep it gentler
 IMAGE_TEMPLATE_INTENSITY_FACTOR = 0.5
@@ -204,9 +206,29 @@ class AnimationPipeline(StandardPipeline):
                 seen.add(key)
                 characters.append(character)
 
+        for character in characters:
+            character.name = character.name.strip()
+            character.display_name = character.spoken_name()
+        for scene in scenes:
+            scene.narration = AnimationPipeline._use_spoken_names(scene.narration, characters)
+
         script.scenes = scenes
         script.characters = characters
         return script
+
+    @staticmethod
+    def _use_spoken_names(narration: str, characters) -> str:
+        """
+        Replace ASCII character names that leaked into narration with their display names,
+        so narration always uses one name per character (e.g. 'Pipi' -> '皮皮').
+        """
+        for character in characters:
+            spoken = character.spoken_name()
+            if not character.name or spoken == character.name:
+                continue
+            pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(character.name)}(?![A-Za-z0-9])", re.IGNORECASE)
+            narration = pattern.sub(spoken, narration)
+        return narration
 
     async def determine_title(self, ctx: PipelineContext):
         """Step 3: Prefer user title, then the script title."""
@@ -230,7 +252,10 @@ class AnimationPipeline(StandardPipeline):
             if ctx.params.get("motion_mode", "camera") == "ai_video"
             else build_scene_image_prompt
         )
-        ctx.image_prompts = [builder(scene, script.characters, style_prompt) for scene in script.scenes]
+        composition = composition_hint(ctx.params.get("media_width"), ctx.params.get("media_height"))
+        ctx.image_prompts = [
+            builder(scene, script.characters, style_prompt, composition) for scene in script.scenes
+        ]
         ctx.extras["camera_motions"] = [self._resolve_camera(ctx, scene) for scene in script.scenes]
         logger.info(f"✅ Built {len(ctx.image_prompts)} scene prompts (style: {style_prompt[:60]}...)")
 

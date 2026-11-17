@@ -188,7 +188,10 @@ class AnimationPipelineUI(PipelineUI):
                 t.template_path for t in get_all_templates_with_info()
                 if get_template_type(t.template_path) in allowed_types
             ]
-            templates.sort(key=lambda p: (get_template_type(p) != "video", p))
+            # Full-screen video templates first: they suit animation best
+            templates.sort(key=lambda p: (
+                get_template_type(p) != "video", "fullscreen" not in p, not p.startswith("1080x1920"), p
+            ))
             frame_template = st.selectbox(tr("animation.template"), templates, key=f"{KEY}template")
             if get_template_type(frame_template) == "image":
                 st.caption(tr("animation.template.image_hint"))
@@ -390,7 +393,9 @@ class AnimationPipelineUI(PipelineUI):
             if script.get("logline"):
                 st.markdown(f"*{script['logline']}*")
             for character in script.get("characters", []):
-                st.markdown(f"- **{character['name']}**: {character['appearance']}")
+                spoken = character.get("display_name") or character["name"]
+                label = spoken if spoken == character["name"] else f"{spoken} ({character['name']})"
+                st.markdown(f"- **{label}**: {character['appearance']}")
             for i, scene in enumerate(script.get("scenes", []), 1):
                 camera = (data.get("camera_motions") or [""] * i)[i - 1]
                 st.markdown(f"**{i}.** {scene['narration']}  \n`{camera}` · {scene['visual']}")

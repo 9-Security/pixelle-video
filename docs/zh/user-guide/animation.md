@@ -30,6 +30,9 @@
 | `camera_intensity` | 0.0 – 0.5 | 默认 0.15；`image_*` 模板会自动减半，因为字幕会随画面移动 |
 
 推荐使用 `video_*` 模板：画面在下层运动，字幕保持固定。
+默认的 `video_fullscreen.html`（1080x1920，另有 1920x1080）让动画铺满整个画面，并加上上下渐层暗角保证标题与字幕清晰（可调整 `title_size`、`subtitle_size`、`accent_color`）。
+
+每个角色有 `name`（英文代号，用于图像提示词）与 `display_name`（旁白中使用、与故事同语言的名字）；若旁白中出现英文代号，会自动替换为 `display_name`，确保名称一致。
 
 ## 免费方案：Gemini + Cloudflare Workers AI
 
@@ -63,7 +66,7 @@ curl -X POST http://localhost:8000/api/animation/generate/async \
         "art_style": "watercolor",
         "motion_mode": "camera",
         "media_workflow": "api/cloudflare/flux-1-schnell",
-        "frame_template": "1080x1920/video_default.html",
+        "frame_template": "1080x1920/video_fullscreen.html",
         "tts_voice": "zh-CN-XiaoxiaoNeural"
       }'
 ```

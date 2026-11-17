@@ -69,13 +69,23 @@ class CameraMotion(str, Enum):
 class AnimationCharacter(BaseModel):
     """A recurring character with a fixed visual description."""
 
-    name: str = Field(description="Short unique character name")
+    name: str = Field(
+        description="Short unique ASCII name used in English fields (visual/characters), e.g. 'Pipi'"
+    )
+    display_name: str = Field(
+        default="",
+        description="The character's name as used in narration, in the narration language, e.g. '皮皮'",
+    )
     appearance: str = Field(
         description=(
             "Fixed English visual description reused in every scene: species/gender, age, "
             "body shape, hair, clothing, colors and distinctive features"
         )
     )
+
+    def spoken_name(self) -> str:
+        """Name used in narration (falls back to `name`)."""
+        return (self.display_name or "").strip() or self.name.strip()
 
 
 class AnimationScene(BaseModel):

@@ -31,6 +31,11 @@ prefix in every scene prompt, so it works with any image model without LoRA or r
 | `camera_intensity` | 0.0 – 0.5 | Default 0.15. Halved automatically for `image_*` templates because their subtitles move with the camera. |
 
 `video_*` templates are recommended: the image is animated underneath and subtitles stay fixed.
+The default `video_fullscreen.html` (1080x1920, also 1920x1080) fills the whole frame with the animation
+and adds top/bottom scrims for readable title and subtitles (`title_size`, `subtitle_size`, `accent_color` are adjustable).
+
+Each character has a `name` (ASCII, used in English image prompts) and a `display_name` (used in narration,
+in the story's language). Any ASCII name that leaks into narration is replaced with the display name.
 
 ## Free setup: Gemini + Cloudflare Workers AI
 
@@ -68,7 +73,7 @@ curl -X POST http://localhost:8000/api/animation/generate/async \
         "art_style": "watercolor",
         "motion_mode": "camera",
         "media_workflow": "api/cloudflare/flux-1-schnell",
-        "frame_template": "1080x1920/video_default.html",
+        "frame_template": "1080x1920/video_fullscreen.html",
         "tts_voice": "en-US-AriaNeural"
       }'
 ```
@@ -89,7 +94,7 @@ result = await core.generate_video(
     n_scenes=5,
     art_style="watercolor",
     media_workflow="runninghub/image_flux.json",
-    frame_template="1080x1920/video_default.html",
+    frame_template="1080x1920/video_fullscreen.html",
 )
 print(result.video_path)
 ```

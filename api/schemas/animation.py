@@ -38,7 +38,7 @@ class AnimationGenerateRequest(BaseModel):
     media_workflow: str = Field(..., description="Image workflow (camera) or video workflow (ai_video)")
     api_video_params: Optional[Dict[str, Any]] = Field(None, description="Extra params for API video models")
 
-    frame_template: str = Field("1080x1920/video_default.html", description="Subtitle template")
+    frame_template: str = Field("1080x1920/video_fullscreen.html", description="Subtitle template")
     template_params: Optional[Dict[str, Any]] = None
     video_fps: int = Field(30, ge=10, le=60)
 
@@ -58,7 +58,7 @@ class AnimationGenerateRequest(BaseModel):
             "art_style": "watercolor",
             "motion_mode": "camera",
             "media_workflow": "api/cloudflare/flux-1-schnell",
-            "frame_template": "1080x1920/video_default.html",
+            "frame_template": "1080x1920/video_fullscreen.html",
             "tts_voice": "zh-CN-XiaoxiaoNeural",
         }
     })
