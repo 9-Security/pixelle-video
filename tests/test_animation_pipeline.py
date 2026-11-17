@@ -285,3 +285,46 @@ def test_api_styles_and_validation():
 
     r = client.post("/api/animation/generate/sync", json={"text": "x"})
     assert r.status_code == 422  # media_workflow is required
+
+
+async def test_script_llm_fails_fast_on_client_errors(monkeypatch):
+    """A 404/401 from the LLM must not be retried; parse errors must be."""
+    from pixelle_video.pipelines import animation as anim
+    from pixelle_video.service import PixelleVideoCore
+
+    core = PixelleVideoCore()
+    await core.initialize()
+    pipeline = core.pipelines["animation"]
+
+    async def no_sleep(*_):
+        return None
+
+    monkeypatch.setattr(anim.asyncio, "sleep", no_sleep)
+
+    class StatusError(Exception):
+        def __init__(self, status_code):
+            super().__init__(f"HTTP {status_code}")
+            self.status_code = status_code
+
+    calls = {"n": 0}
+
+    async def not_found(**kwargs):
+        calls["n"] += 1
+        raise StatusError(404)
+
+    monkeypatch.setattr(pipeline, "llm", not_found)
+    with pytest.raises(RuntimeError, match="HTTP 404"):
+        await pipeline._call_script_llm("prompt")
+    assert calls["n"] == 1
+
+    calls["n"] = 0
+
+    async def flaky(**kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ValueError("Failed to parse LLM response")
+        return _script()
+
+    monkeypatch.setattr(pipeline, "llm", flaky)
+    assert (await pipeline._call_script_llm("prompt")).title == "Little Fox"
+    assert calls["n"] == 3

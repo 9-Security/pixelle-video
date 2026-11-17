@@ -163,10 +163,22 @@ class AnimationPipeline(StandardPipeline):
                     temperature=0.8,
                     max_tokens=6000,
                 )
-            except Exception as e:  # LLM / parse errors are retried
+            except Exception as e:
+                if not self._is_retryable_llm_error(e):
+                    raise RuntimeError(f"Failed to generate animation script: {e}") from e
                 last_error = e
                 logger.warning(f"Animation script generation failed (attempt {attempt}): {e}")
+                if attempt <= retries:
+                    await asyncio.sleep(min(10.0, 2.0 * attempt))
         raise RuntimeError(f"Failed to generate animation script: {last_error}")
+
+    @staticmethod
+    def _is_retryable_llm_error(error: Exception) -> bool:
+        """Retry parse failures, timeouts, rate limits and 5xx; fail fast on other 4xx."""
+        status = getattr(error, "status_code", None)
+        if status is None:
+            return True  # parse/validation errors, timeouts, connection errors
+        return status in (408, 409, 429) or status >= 500
 
     @staticmethod
     def _normalize_script(script: AnimationScript, n_scenes: int, mode: str) -> AnimationScript:

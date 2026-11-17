@@ -34,7 +34,7 @@
 ## 免费方案：Gemini + Cloudflare Workers AI
 
 1. **LLM**：系统配置 → LLM 预设选 **Gemini**，填入 Google AI Studio API Key
-   （Base URL `https://generativelanguage.googleapis.com/v1beta/openai/`，模型 `gemini-2.5-flash`）。
+   （Base URL `https://generativelanguage.googleapis.com/v1beta/openai/`，模型 `gemini-flash-latest`）。
 2. **图片**：系统配置 → API 媒体模型 → **Cloudflare Workers AI**，填入 Account ID 与具备 *Workers AI* 权限的 API Token；
    然后在动画生成页选择来源 **API 模型** 与 `flux-1-schnell - API Cloudflare`（工作流 key：`api/cloudflare/flux-1-schnell`）。
 3. **配音**：本地 Edge-TTS 无需 Key。

@@ -35,7 +35,7 @@ prefix in every scene prompt, so it works with any image model without LoRA or r
 ## Free setup: Gemini + Cloudflare Workers AI
 
 1. **LLM** – Settings → LLM preset **Gemini**, paste a Google AI Studio API key
-   (base URL `https://generativelanguage.googleapis.com/v1beta/openai/`, model `gemini-2.5-flash`).
+   (base URL `https://generativelanguage.googleapis.com/v1beta/openai/`, model `gemini-flash-latest`).
 2. **Images** – Settings → API Media Models → **Cloudflare Workers AI**: fill in the Account ID and an
    API token with *Workers AI* permission. Then choose source **API models** and
    `flux-1-schnell - API Cloudflare` in the Animation tab (workflow key `api/cloudflare/flux-1-schnell`).

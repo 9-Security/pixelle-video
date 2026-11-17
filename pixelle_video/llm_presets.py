@@ -41,7 +41,7 @@ LLM_PRESETS: List[Dict[str, Any]] = [
     {
         "name": "Gemini",
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "model": "gemini-2.5-flash",
+        "model": "gemini-flash-latest",
         "api_key_url": "https://aistudio.google.com/apikey",
     },
     {
