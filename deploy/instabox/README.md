@@ -8,7 +8,7 @@ such as freellmapi and llama-server.
 |---|---|---|
 | Web UI (Streamlit) | `127.0.0.1:8501` | instabox **private** port (token link) |
 | REST API (FastAPI, no auth) | `127.0.0.1:8000` | localhost only (e.g. for `webui_bridge.py`) |
-| LLM | freellmapi `127.0.0.1:3001/v1` | localhost |
+| LLM | Google Gemini (default) or freellmapi `127.0.0.1:3001/v1` | outbound HTTPS / localhost |
 | Images | Cloudflare Workers AI | outbound HTTPS |
 | Narration | Edge-TTS | outbound |
 
@@ -31,7 +31,7 @@ Playwright browser download is needed.
 
 ## Secrets
 
-`config.yaml` only holds references such as `${FREELLMAPI_API_KEY}`. Provide
+`config.yaml` only holds references such as `${PIXELLE_LLM_API_KEY}`. Provide
 values in one of two ways:
 
 1. `secrets.env` next to `config.yaml` (chmod 600), or

@@ -8,11 +8,15 @@
 
 project_name: Pixelle-Video
 
-# LLM: freellmapi on the same machine (OpenAI-compatible, rotates free providers)
+# LLM (any OpenAI-compatible endpoint). Default: Google Gemini free tier.
+# To use freellmapi on this machine instead, set in secrets.env:
+#   PIXELLE_LLM_BASE_URL=http://127.0.0.1:3001/v1
+#   PIXELLE_LLM_MODEL=auto
+#   PIXELLE_LLM_API_KEY=<freellmapi unified key>
 llm:
-  api_key: ${FREELLMAPI_API_KEY}
-  base_url: http://127.0.0.1:3001/v1
-  model: ${PIXELLE_LLM_MODEL:-auto}
+  api_key: ${PIXELLE_LLM_API_KEY}
+  base_url: ${PIXELLE_LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
+  model: ${PIXELLE_LLM_MODEL:-gemini-flash-latest}
 
 api_providers:
   common:

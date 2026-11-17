@@ -59,13 +59,20 @@ def test_save_keeps_references_not_secrets(monkeypatch, tmp_path):
 
 
 def test_instabox_config_template_is_valid(monkeypatch):
-    monkeypatch.setenv("FREELLMAPI_API_KEY", "k")
+    monkeypatch.setenv("PIXELLE_LLM_API_KEY", "k")
+    monkeypatch.delenv("PIXELLE_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("PIXELLE_LLM_MODEL", raising=False)
     monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acc")
     monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")
     data = load_config_dict(str(DEPLOY / "config.instabox.yaml"))
     config = PixelleVideoConfig(**data)
-    assert config.llm.base_url == "http://127.0.0.1:3001/v1"
-    assert config.llm.api_key == "k" and config.llm.model == "auto"
+    assert config.llm.base_url == "https://generativelanguage.googleapis.com/v1beta/openai/"
+    assert config.llm.api_key == "k" and config.llm.model == "gemini-flash-latest"
+    # Switching provider is an env change only
+    monkeypatch.setenv("PIXELLE_LLM_BASE_URL", "http://127.0.0.1:3001/v1")
+    monkeypatch.setenv("PIXELLE_LLM_MODEL", "auto")
+    data = load_config_dict(str(DEPLOY / "config.instabox.yaml"))
+    assert data["llm"]["base_url"] == "http://127.0.0.1:3001/v1" and data["llm"]["model"] == "auto"
     assert config.api_providers.cloudflare.api_token == "tok"
     assert config.template.default_template == "1080x1920/video_fullscreen.html"
 
