@@ -199,3 +199,59 @@ async def test_camera_mode_renders_single_pass(monkeypatch, tmp_path, template):
         assert "video,1080,1920" in probe and "audio" in probe
     finally:
         shutil.rmtree(Path(result.video_path).parent, ignore_errors=True)
+
+
+
+async def test_segmentation_is_serialized_during_prefetch(monkeypatch, tmp_path):
+    """Network work is concurrent, but at most one segmentation runs at a time."""
+    import time
+
+    from pixelle_video.models.animation import AnimationCharacter, AnimationScene, AnimationScript
+    from pixelle_video.models.media import MediaResult
+    from pixelle_video.pipelines.linear import PipelineContext
+    from pixelle_video.service import PixelleVideoCore
+
+    core = PixelleVideoCore()
+    await core.initialize()
+    pipeline = core.pipelines["animation"]
+
+    async def media(prompt, index=1, **kwargs):
+        p = tmp_path / f"i{index}.png"
+        Image.new("RGB", (32, 32)).save(p)
+        return MediaResult(media_type="image", url=f"file://{p}")
+
+    async def tts(text, output_path=None, **kwargs):
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=d=0.3", output_path],
+                       check=True)
+        return output_path
+
+    async def compose(frame, storyboard, config):
+        frame.composed_image_path = frame.image_path
+
+    active = {"now": 0, "max": 0}
+
+    def segment(image_path, w, h):
+        active["now"] += 1
+        active["max"] = max(active["max"], active["now"])
+        time.sleep(0.05)
+        active["now"] -= 1
+        return None
+
+    monkeypatch.setattr(core, "media", media)
+    monkeypatch.setattr(core, "tts", tts)
+    monkeypatch.setattr(core.frame_processor, "_step_compose_frame", compose)
+    monkeypatch.setattr(pipeline._parallax_renderer(), "segment", segment)
+    script = AnimationScript(title="t", characters=[AnimationCharacter(name="A", appearance="a")],
+                             scenes=[AnimationScene(narration=f"s{i}", visual="v") for i in range(4)])
+    ctx = PipelineContext(input_text="", params={"script": script, "media_workflow": "api/cloudflare/x"})
+    await pipeline.setup_environment(ctx)
+    await pipeline.generate_content(ctx)
+    await pipeline.determine_title(ctx)
+    await pipeline.plan_visuals(ctx)
+    await pipeline.initialize_storyboard(ctx)
+    try:
+        await pipeline._prefetch_scene_assets(ctx)
+        assert active["max"] == 1
+        assert sorted(ctx.extras["masks"]) == [0, 1, 2, 3]
+    finally:
+        shutil.rmtree(ctx.task_dir, ignore_errors=True)

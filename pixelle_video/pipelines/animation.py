@@ -470,6 +470,10 @@ class AnimationPipeline(StandardPipeline):
         ctx.extras.setdefault("masks", {})
         limit = self._prefetch_limit(ctx)
         semaphore = asyncio.Semaphore(limit)
+        # Segmentation is CPU-bound and multi-threaded inside onnxruntime: running
+        # several at once oversubscribes small machines, so it is serialized while
+        # still overlapping with other scenes' network work.
+        segmentation_slot = asyncio.Semaphore(1)
         done = 0
 
         async def fetch(frame: StoryboardFrame):
@@ -479,10 +483,11 @@ class AnimationPipeline(StandardPipeline):
                 await self._generate_scene_image(ctx, frame)
             await self._prepare_scene_overlay(ctx, frame)
             if ctx.params.get("motion_mode") == "parallax":
-                ctx.extras["masks"][frame.index] = await asyncio.to_thread(
-                    self._parallax_renderer().segment,
-                    frame.image_path, ctx.config.media_width, ctx.config.media_height,
-                )
+                async with segmentation_slot:
+                    ctx.extras["masks"][frame.index] = await asyncio.to_thread(
+                        self._parallax_renderer().segment,
+                        frame.image_path, ctx.config.media_width, ctx.config.media_height,
+                    )
             done += 1
             if ctx.progress_callback:
                 ctx.progress_callback(ProgressEvent(
