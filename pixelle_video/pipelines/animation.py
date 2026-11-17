@@ -50,11 +50,13 @@ from pixelle_video.prompts.animation_script import (
     composition_hint,
     get_style_prompt,
 )
+from pixelle_video.services.animation_fx import ParallaxOptions, ParallaxRenderer, normalize_effect
 from pixelle_video.services.video import VideoService
 from pixelle_video.utils.os_util import get_task_frame_path
 from pixelle_video.utils.template_util import get_template_type
 
-MOTION_MODES = ("camera", "ai_video")
+MOTION_MODES = ("parallax", "camera", "ai_video")
+DEFAULT_MOTION_MODE = "parallax"
 SCRIPT_MODES = ("generate", "adapt")
 DEFAULT_TEMPLATE = "1080x1920/video_fullscreen.html"
 MAX_SCENES = 30
@@ -73,10 +75,13 @@ class AnimationPipeline(StandardPipeline):
         art_style: key of ANIMATION_STYLE_PRESETS (default "anime")
         custom_style: free-text style prompt, overrides art_style
         max_characters: max recurring characters (default 4)
-        motion_mode: "camera" | "ai_video"
+        motion_mode: "parallax" (2.5D layers + particles, default) | "camera" | "ai_video"
         camera_motion: "auto" (use LLM choice) or a fixed CameraMotion value
-        camera_intensity: 0.0-0.5 zoom/pan amount (default 0.15)
-        media_workflow: image workflow (camera) or video workflow (ai_video)
+        camera_intensity: 0.0-0.5 zoom/pan amount (default 0.15; 0.12 for parallax)
+        ambient_effect: "auto" (LLM choice per scene), "none" or a fixed particle effect (parallax)
+        parallax_strength: 0.0-1.5 extra character movement vs background (default 0.6)
+        character_motion: subtle character breathing/bob in parallax mode (default True)
+        media_workflow: image workflow (parallax/camera) or video workflow (ai_video)
         frame_template: subtitle template; video_* recommended
         plus all TTS / BGM / output params of StandardPipeline
     """
@@ -96,7 +101,7 @@ class AnimationPipeline(StandardPipeline):
         if mode not in SCRIPT_MODES:
             raise ValueError(f"mode must be one of {SCRIPT_MODES}, got '{mode}'")
 
-        motion_mode = params.get("motion_mode", "camera")
+        motion_mode = params.setdefault("motion_mode", DEFAULT_MOTION_MODE)
         if motion_mode not in MOTION_MODES:
             raise ValueError(f"motion_mode must be one of {MOTION_MODES}, got '{motion_mode}'")
 
@@ -111,6 +116,8 @@ class AnimationPipeline(StandardPipeline):
             raise ValueError("Animation pipeline needs an image_* or video_* template, not static_*")
         if motion_mode == "ai_video" and template_type != "video":
             raise ValueError("motion_mode='ai_video' requires a video_* frame template")
+        if motion_mode == "parallax" and template_type != "video":
+            raise ValueError("motion_mode='parallax' requires a video_* frame template")
         if motion_mode == "ai_video" and not params.get("media_workflow"):
             raise ValueError("motion_mode='ai_video' requires a video media_workflow")
 
@@ -249,7 +256,7 @@ class AnimationPipeline(StandardPipeline):
 
         builder = (
             build_scene_video_prompt
-            if ctx.params.get("motion_mode", "camera") == "ai_video"
+            if ctx.params.get("motion_mode") == "ai_video"
             else build_scene_image_prompt
         )
         composition = composition_hint(ctx.params.get("media_width"), ctx.params.get("media_height"))
@@ -257,6 +264,7 @@ class AnimationPipeline(StandardPipeline):
             builder(scene, script.characters, style_prompt, composition) for scene in script.scenes
         ]
         ctx.extras["camera_motions"] = [self._resolve_camera(ctx, scene) for scene in script.scenes]
+        ctx.extras["ambient_effects"] = [self._resolve_ambient(ctx, scene) for scene in script.scenes]
         logger.info(f"✅ Built {len(ctx.image_prompts)} scene prompts (style: {style_prompt[:60]}...)")
 
     @staticmethod
@@ -266,11 +274,24 @@ class AnimationPipeline(StandardPipeline):
             return CameraMotion.parse(fixed)
         return CameraMotion.parse(scene.camera)
 
+    @staticmethod
+    def _resolve_ambient(ctx: PipelineContext, scene: AnimationScene) -> str:
+        fixed = ctx.params.get("ambient_effect", "auto")
+        if fixed and fixed != "auto":
+            return normalize_effect(fixed)
+        return normalize_effect(scene.ambient)
+
+    def _parallax_renderer(self) -> ParallaxRenderer:
+        """One renderer per pipeline so the segmentation model loads once."""
+        if getattr(self, "_renderer", None) is None:
+            self._renderer = ParallaxRenderer()
+        return self._renderer
+
     # ==================== Asset production ====================
 
     async def produce_assets(self, ctx: PipelineContext):
         """Step 6: Produce audio + animated media per scene."""
-        if ctx.params.get("motion_mode", "camera") == "ai_video":
+        if ctx.params.get("motion_mode") == "ai_video":
             # AI video: standard frame processor already does TTS -> video -> overlay
             await super().produce_assets(ctx)
             return
@@ -332,7 +353,8 @@ class AnimationPipeline(StandardPipeline):
         storyboard = ctx.storyboard
         video_service = VideoService()
         motion: CameraMotion = ctx.extras["camera_motions"][frame.index]
-        intensity = float(ctx.params.get("camera_intensity", 0.15))
+        parallax = ctx.params.get("motion_mode") == "parallax"
+        intensity = float(ctx.params.get("camera_intensity", 0.12 if parallax else 0.15))
         template_type = get_template_type(config.frame_template)
 
         on_step(1, "audio", 0.0)
@@ -360,17 +382,37 @@ class AnimationPipeline(StandardPipeline):
         if template_type == "video":
             # Animate the raw image, then overlay the transparent subtitle template
             clip_path = get_task_frame_path(config.task_id, frame.index, "video")
-            await asyncio.to_thread(
-                video_service.create_motion_clip,
-                image=frame.image_path,
-                output=clip_path,
-                duration=frame.duration,
-                motion=motion.value,
-                intensity=intensity,
-                fps=config.video_fps,
-                width=config.media_width,
-                height=config.media_height,
-            )
+            if parallax:
+                options = ParallaxOptions(
+                    motion=motion.value,
+                    intensity=intensity,
+                    parallax=max(0.0, min(1.5, float(ctx.params.get("parallax_strength", 0.6)))),
+                    ambient=ctx.extras["ambient_effects"][frame.index],
+                    breathing=bool(ctx.params.get("character_motion", True)),
+                    fps=config.video_fps,
+                    seed=frame.index + 1,
+                )
+                await asyncio.to_thread(
+                    self._parallax_renderer().render,
+                    frame.image_path,
+                    clip_path,
+                    frame.duration,
+                    config.media_width,
+                    config.media_height,
+                    options,
+                )
+            else:
+                await asyncio.to_thread(
+                    video_service.create_motion_clip,
+                    image=frame.image_path,
+                    output=clip_path,
+                    duration=frame.duration,
+                    motion=motion.value,
+                    intensity=intensity,
+                    fps=config.video_fps,
+                    width=config.media_width,
+                    height=config.media_height,
+                )
             frame.media_type = "video"
             frame.video_path = clip_path
 
@@ -412,7 +454,9 @@ class AnimationPipeline(StandardPipeline):
             payload = {
                 "script": script.model_dump(),
                 "style_prompt": ctx.extras.get("style_prompt"),
+                "motion_mode": ctx.params.get("motion_mode"),
                 "camera_motions": [m.value for m in ctx.extras.get("camera_motions", [])],
+                "ambient_effects": ctx.extras.get("ambient_effects", []),
                 "scene_prompts": ctx.image_prompts,
             }
             path = Path(ctx.task_dir) / "animation_script.json"

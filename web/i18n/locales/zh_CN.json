@@ -527,7 +527,7 @@
     "animation.art_style.custom": "自定义",
     "animation.custom_style": "自定义画风提示词（英文）",
     "animation.custom_style.required": "请填写自定义画风提示词",
-    "animation.motion.what": "**运镜动画**：先生成图片，再用推拉/平移镜头让画面动起来，任何图片工作流皆可用，成本最低。\n\n**AI 视频**：使用文生视频模型（如 WAN 2.x）生成真正的角色动作，效果最好但耗时与成本较高，需搭配 video_* 模板。",
+    "animation.motion.what": "**2.5D 视差动画**（推荐）：自动把角色与背景分层，各层以不同速度移动产生立体感，加上角色呼吸动作与萤火虫、飘雪等环境特效，CPU 即可运行、免费。\n\n**运镜动画**：先生成图片，再用推拉/平移镜头让画面动起来，任何图片工作流皆可用，成本最低。\n\n**AI 视频**：使用文生视频模型（如 WAN 2.x）生成真正的角色动作，效果最好但耗时与成本较高，需搭配 video_* 模板。",
     "animation.motion_mode": "动画方式",
     "animation.motion_mode.camera": "运镜动画（图片）",
     "animation.motion_mode.ai_video": "AI 视频",
@@ -547,6 +547,21 @@
     "animation.camera.static": "固定",
     "animation.intensity": "运镜幅度",
     "animation.generate": "🎞️ 生成动画",
-    "animation.script": "📜 动画剧本"
+    "animation.script": "📜 动画剧本",
+    "animation.motion_mode.parallax": "2.5D 视差动画（推荐）",
+    "animation.ambient": "环境特效",
+    "animation.ambient.auto": "自动（AI 依场景决定）",
+    "animation.ambient.none": "无",
+    "animation.ambient.fireflies": "萤火虫",
+    "animation.ambient.stars": "星光闪烁",
+    "animation.ambient.snow": "飘雪",
+    "animation.ambient.rain": "下雨",
+    "animation.ambient.petals": "花瓣飘落",
+    "animation.ambient.dust": "光尘",
+    "animation.ambient.embers": "火星",
+    "animation.ambient.bubbles": "泡泡",
+    "animation.parallax_strength": "视差强度",
+    "animation.character_motion": "角色呼吸动作",
+    "animation.parallax.model_hint": "首次使用会自动下载约 176 MB 的去背模型（isnet-anime），并以 SHA-256 校验。"
   }
 }

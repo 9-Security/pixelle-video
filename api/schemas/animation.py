@@ -32,9 +32,18 @@ class AnimationGenerateRequest(BaseModel):
     art_style: str = Field("anime", description="Style preset key, see /api/animation/styles")
     custom_style: Optional[str] = Field(None, description="Free-text style prompt (overrides art_style)")
 
-    motion_mode: Literal["camera", "ai_video"] = Field("camera", description="Animation mode")
+    motion_mode: Literal["parallax", "camera", "ai_video"] = Field(
+        "parallax", description="parallax: 2.5D layers + particles; camera: zoom/pan only; ai_video: video model"
+    )
+    ambient_effect: str = Field(
+        "auto", description="auto (LLM per scene), none, fireflies, stars, snow, rain, petals, dust, embers, bubbles"
+    )
+    parallax_strength: float = Field(0.6, ge=0.0, le=1.5, description="Extra character movement vs background")
+    character_motion: bool = Field(True, description="Subtle character breathing/bob (parallax)")
     camera_motion: str = Field("auto", description="auto or zoom_in/zoom_out/pan_left/pan_right/pan_up/pan_down/static")
-    camera_intensity: float = Field(0.15, ge=0.0, le=0.5, description="Zoom/pan amount")
+    camera_intensity: Optional[float] = Field(
+        None, ge=0.0, le=0.5, description="Zoom/pan amount (default 0.12 parallax, 0.15 camera)"
+    )
     media_workflow: str = Field(..., description="Image workflow (camera) or video workflow (ai_video)")
     api_video_params: Optional[Dict[str, Any]] = Field(None, description="Extra params for API video models")
 
@@ -56,7 +65,7 @@ class AnimationGenerateRequest(BaseModel):
             "text": "A little fox afraid of the dark sets out to bring the moon back",
             "n_scenes": 5,
             "art_style": "watercolor",
-            "motion_mode": "camera",
+            "motion_mode": "parallax",
             "media_workflow": "api/cloudflare/flux-1-schnell",
             "frame_template": "1080x1920/video_fullscreen.html",
             "tts_voice": "zh-CN-XiaoxiaoNeural",

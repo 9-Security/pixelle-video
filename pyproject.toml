@@ -31,6 +31,8 @@ dependencies = [
     "requests>=2.32.0",
     "pyjwt>=2.10.0",
     "numpy>=1.26.0",
+    "onnxruntime>=1.18",
+    "opencv-python-headless>=4.9",
 ]
 
 [project.optional-dependencies]

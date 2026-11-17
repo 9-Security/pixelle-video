@@ -130,6 +130,8 @@ _COMMON_RULES = """# Output Rules
    - "motion": English, 5~20 words, the movement happening in the shot (for AI video models).
    - "camera": one of static, zoom_in, zoom_out, pan_left, pan_right, pan_up, pan_down.
      Vary the camera across scenes to keep the animation dynamic.
+   - "ambient": an atmospheric particle effect that fits the scene: one of none, fireflies, stars, snow,
+     rain, petals, dust, embers, bubbles. Only use weather/particles consistent with the setting.
 4. Visual style is decided separately; do NOT mention art style, medium or rendering in "visual".
 5. Content must be suitable for a general audience.
 """

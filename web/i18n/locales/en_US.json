@@ -527,7 +527,7 @@
     "animation.art_style.custom": "Custom",
     "animation.custom_style": "Custom style prompt (English)",
     "animation.custom_style.required": "Please enter a custom style prompt",
-    "animation.motion.what": "**Camera motion**: generate a still image, then animate it with zoom/pan moves. Works with any image workflow and is the cheapest.\n\n**AI video**: use a text-to-video model (e.g. WAN 2.x) for real character motion. Best quality, slower and more expensive; requires a video_* template.",
+    "animation.motion.what": "**2.5D parallax** (recommended): splits characters from the background so layers move at different speeds, adds subtle character breathing and ambient effects such as fireflies or snow. Runs on CPU, free.\n\n**Camera motion**: generate a still image, then animate it with zoom/pan moves. Works with any image workflow and is the cheapest.\n\n**AI video**: use a text-to-video model (e.g. WAN 2.x) for real character motion. Best quality, slower and more expensive; requires a video_* template.",
     "animation.motion_mode": "Animation mode",
     "animation.motion_mode.camera": "Camera motion (image)",
     "animation.motion_mode.ai_video": "AI video",
@@ -547,6 +547,21 @@
     "animation.camera.static": "Static",
     "animation.intensity": "Motion amount",
     "animation.generate": "🎞️ Generate Animation",
-    "animation.script": "📜 Animation Script"
+    "animation.script": "📜 Animation Script",
+    "animation.motion_mode.parallax": "2.5D parallax (recommended)",
+    "animation.ambient": "Ambient effect",
+    "animation.ambient.auto": "Auto (AI picks per scene)",
+    "animation.ambient.none": "None",
+    "animation.ambient.fireflies": "Fireflies",
+    "animation.ambient.stars": "Twinkling stars",
+    "animation.ambient.snow": "Snow",
+    "animation.ambient.rain": "Rain",
+    "animation.ambient.petals": "Falling petals",
+    "animation.ambient.dust": "Light dust",
+    "animation.ambient.embers": "Embers",
+    "animation.ambient.bubbles": "Bubbles",
+    "animation.parallax_strength": "Parallax strength",
+    "animation.character_motion": "Character breathing motion",
+    "animation.parallax.model_hint": "First use downloads a ~176 MB segmentation model (isnet-anime), verified by SHA-256."
   }
 }

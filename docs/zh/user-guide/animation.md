@@ -24,7 +24,7 @@
 | 参数 | 可选值 | 说明 |
 |---|---|---|
 | `mode` | `generate` / `adapt` | `generate`：根据创意编写新故事；`adapt`：把已有故事拆成分镜并保留原文 |
-| `motion_mode` | `camera` / `ai_video` | `camera` 支持任意图片工作流，成本最低；`ai_video` 需要视频工作流与 `video_*` 模板 |
+| `motion_mode` | `parallax` / `camera` / `ai_video` | `camera` 支持任意图片工作流，成本最低；`ai_video` 需要视频工作流与 `video_*` 模板 |
 | `art_style` | `anime`、`3d_cartoon`、`watercolor`、`chinese_ink`、`pixel_art`、`clay`、`flat_vector`、`comic` | 填写 `custom_style` 时以自定义为准 |
 | `camera_motion` | `auto`、`zoom_in`、`zoom_out`、`pan_left`、`pan_right`、`pan_up`、`pan_down`、`static` | `auto` 使用 LLM 为每个分镜选择的运镜 |
 | `camera_intensity` | 0.0 – 0.5 | 默认 0.15；`image_*` 模板会自动减半，因为字幕会随画面移动 |
@@ -33,6 +33,21 @@
 默认的 `video_fullscreen.html`（1080x1920，另有 1920x1080）让动画铺满整个画面，并加上上下渐层暗角保证标题与字幕清晰（可调整 `title_size`、`subtitle_size`、`accent_color`）。
 
 每个角色有 `name`（英文代号，用于图像提示词）与 `display_name`（旁白中使用、与故事同语言的名字）；若旁白中出现英文代号，会自动替换为 `display_name`，确保名称一致。
+
+## 2.5D 视差模式（默认）
+
+`motion_mode="parallax"` 在 CPU 上免费把每张静态图变成「活」的场景：
+
+1. **分层**：用开源的 IS-Net 动漫分割模型（ONNX，约 176 MB，首次自动下载到 `~/.cache/pixelle-video/models`
+   或 `$PIXELLE_MODEL_DIR`，并以 SHA-256 校验）把角色抠出；背景的空洞用 OpenCV 修补并轻微模糊。
+2. **视差运镜**：背景与角色按同一个运镜、以不同速度移动，产生前后层次。
+3. **角色待机动作**：以脚底为支点的轻微呼吸与上下起伏（`character_motion`）。
+4. **环境粒子**：`fireflies`、`stars`、`snow`、`rain`、`petals`、`dust`、`embers`、`bubbles`；
+   由 LLM 按分镜选择（`ambient_effect="auto"`），或整支视频固定一种。
+5. **收尾**：暗角、柔和光线脉动，以及分镜之间的短淡入淡出。
+
+若分割不可用（首次下载时无网络，或遮罩不可用），该分镜会退回单层运镜加粒子，不会让整支视频失败。
+角色仍不会走路或说话，这需要搭配视频模型的 `motion_mode="ai_video"`。
 
 ## 免费方案：Gemini + Cloudflare Workers AI
 
@@ -64,7 +79,7 @@ curl -X POST http://localhost:8000/api/animation/generate/async \
         "text": "一只怕黑的小狐狸，为了帮森林找回月亮而踏上冒险",
         "n_scenes": 5,
         "art_style": "watercolor",
-        "motion_mode": "camera",
+        "motion_mode": "parallax",
         "media_workflow": "api/cloudflare/flux-1-schnell",
         "frame_template": "1080x1920/video_fullscreen.html",
         "tts_voice": "zh-CN-XiaoxiaoNeural"

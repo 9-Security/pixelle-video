@@ -38,7 +38,8 @@ from loguru import logger
 from PIL import Image
 
 DEFAULT_BASE_URL = "https://api.cloudflare.com/client/v4"
-RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
+# 409 is returned by Workers AI for transient inference failures (e.g. "Cog prediction failed")
+RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504}
 
 
 @dataclass(frozen=True)

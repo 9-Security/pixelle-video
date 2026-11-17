@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from pixelle_video.models.animation import (
     AnimationCharacter,
@@ -210,6 +211,22 @@ async def test_animation_pipeline_end_to_end_with_mocks(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "media", fake_media)
     monkeypatch.setattr(core, "tts", fake_tts)
 
+    from pixelle_video.services.animation_fx import ParallaxRenderer
+
+    class CenterSegmenter:
+        """Offline stand-in for the ONNX model: a centered ellipse is the 'character'."""
+
+        def predict(self, image):
+            import numpy as np
+            from PIL import ImageDraw
+
+            mask = Image.new("L", image.size, 0)
+            w, h = image.size
+            ImageDraw.Draw(mask).ellipse((w * 0.3, h * 0.3, w * 0.7, h * 0.95), fill=255)
+            return np.asarray(mask, dtype=np.float32) / 255.0
+
+    pipeline._renderer = ParallaxRenderer(CenterSegmenter())
+
     events = []
     try:
         result = await core.generate_video(
@@ -240,6 +257,8 @@ async def test_animation_pipeline_end_to_end_with_mocks(tmp_path, monkeypatch):
         script_file = Path(result.video_path).parent / "animation_script.json"
         data = json.loads(script_file.read_text(encoding="utf-8"))
         assert data["camera_motions"] == ["zoom_in", "zoom_in"]
+        assert data["motion_mode"] == "parallax"
+        assert data["ambient_effects"] == ["none", "none"]
         assert len(data["scene_prompts"]) == 2
     finally:
         shutil.rmtree(Path(result.video_path).parent, ignore_errors=True)
@@ -254,6 +273,9 @@ async def test_pipeline_validation_errors():
         await core.generate_video(text="x", pipeline="animation", motion_mode="ai_video",
                                   frame_template="1080x1920/image_default.html",
                                   media_workflow="runninghub/video_wan2.2.json")
+    with pytest.raises(ValueError, match="parallax"):
+        await core.generate_video(text="x", pipeline="animation",
+                                  frame_template="1080x1920/image_default.html")
     with pytest.raises(ValueError, match="static"):
         await core.generate_video(text="x", pipeline="animation",
                                   frame_template="1080x1920/static_default.html")

@@ -107,13 +107,14 @@ async def test_generate_json_base64_response(monkeypatch, tmp_path):
     assert Image.open(path).size == (512, 288)
 
 
-async def test_generate_binary_response_and_retry(monkeypatch, tmp_path):
+@pytest.mark.parametrize("transient_status", [429, 409, 503])
+async def test_generate_binary_response_and_retry(monkeypatch, tmp_path, transient_status):
     calls = {"n": 0}
 
     def handler(request):
         calls["n"] += 1
         if calls["n"] == 1:
-            return httpx.Response(429, text="rate limited")
+            return httpx.Response(transient_status, text="transient: AiError: Cog prediction failed")
         return httpx.Response(200, content=_png(1024, 576), headers={"content-type": "image/png"})
 
     _patch_transport(monkeypatch, handler)

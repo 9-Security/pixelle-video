@@ -51,6 +51,7 @@ from web.pipelines.base import PipelineUI, register_pipeline_ui
 from web.utils.async_helpers import run_async
 from web.utils.streamlit_helpers import check_and_warn_selfhost_workflow
 
+AMBIENT_OPTIONS = ["auto", "none", "fireflies", "stars", "snow", "rain", "petals", "dust", "embers", "bubbles"]
 CAMERA_OPTIONS = ["auto", "zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down", "static"]
 KEY = "anim_"
 
@@ -167,6 +168,7 @@ class AnimationPipelineUI(PipelineUI):
 
         api_video_params = None
         camera_motion, camera_intensity = "auto", 0.15
+        ambient_effect, parallax_strength, character_motion = "auto", 0.6, True
 
         with st.container(border=True):
             st.markdown(f"**{tr('animation.section.motion')}**")
@@ -175,15 +177,15 @@ class AnimationPipelineUI(PipelineUI):
 
             motion_mode = st.radio(
                 tr("animation.motion_mode"),
-                ["camera", "ai_video"],
+                ["parallax", "camera", "ai_video"],
                 format_func=lambda m: tr(f"animation.motion_mode.{m}"),
                 horizontal=True,
                 key=f"{KEY}motion_mode",
             )
             media_type = "video" if motion_mode == "ai_video" else "image"
 
-            # Subtitle template: video_* always; image_* only for camera mode
-            allowed_types = {"video"} if motion_mode == "ai_video" else {"video", "image"}
+            # Subtitle template: video_* always; image_* only for plain camera mode
+            allowed_types = {"video", "image"} if motion_mode == "camera" else {"video"}
             templates = [
                 t.template_path for t in get_all_templates_with_info()
                 if get_template_type(t.template_path) in allowed_types
@@ -243,7 +245,7 @@ class AnimationPipelineUI(PipelineUI):
             if media_width and media_height:
                 st.info(f"📐 {media_width}x{media_height}")
 
-            if motion_mode == "camera":
+            if motion_mode in ("parallax", "camera"):
                 col1, col2 = st.columns(2)
                 with col1:
                     camera_motion = st.selectbox(
@@ -252,8 +254,23 @@ class AnimationPipelineUI(PipelineUI):
                         key=f"{KEY}camera",
                     )
                 with col2:
-                    camera_intensity = st.slider(tr("animation.intensity"), 0.0, 0.4, 0.15, 0.05,
-                                                 key=f"{KEY}intensity")
+                    default_intensity = 0.12 if motion_mode == "parallax" else 0.15
+                    camera_intensity = st.slider(tr("animation.intensity"), 0.0, 0.4, default_intensity, 0.01,
+                                                 key=f"{KEY}intensity_{motion_mode}")
+            if motion_mode == "parallax":
+                col1, col2 = st.columns(2)
+                with col1:
+                    ambient_effect = st.selectbox(
+                        tr("animation.ambient"), AMBIENT_OPTIONS,
+                        format_func=lambda a: tr(f"animation.ambient.{a}"),
+                        key=f"{KEY}ambient",
+                    )
+                with col2:
+                    parallax_strength = st.slider(tr("animation.parallax_strength"), 0.0, 1.5, 0.6, 0.1,
+                                                  key=f"{KEY}parallax_strength")
+                character_motion = st.checkbox(tr("animation.character_motion"), value=True,
+                                               key=f"{KEY}character_motion")
+                st.caption(tr("animation.parallax.model_hint"))
             elif workflow_key and workflow_key.startswith("api/"):
                 ratio = "9:16" if (media_height or 0) > (media_width or 0) else "16:9"
                 api_video_params = render_api_video_controls(
@@ -269,6 +286,9 @@ class AnimationPipelineUI(PipelineUI):
             "media_height": media_height,
             "camera_motion": camera_motion,
             "camera_intensity": camera_intensity,
+            "ambient_effect": ambient_effect if motion_mode == "parallax" else None,
+            "parallax_strength": parallax_strength if motion_mode == "parallax" else None,
+            "character_motion": character_motion if motion_mode == "parallax" else None,
             "api_video_params": api_video_params,
         }
 

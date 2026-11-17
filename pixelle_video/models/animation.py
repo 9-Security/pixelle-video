@@ -106,11 +106,22 @@ class AnimationScene(BaseModel):
         default=CameraMotion.ZOOM_IN.value,
         description="Camera move: static, zoom_in, zoom_out, pan_left, pan_right, pan_up, pan_down",
     )
+    ambient: str = Field(
+        default="none",
+        description="Ambient particles: none, fireflies, stars, snow, rain, petals, dust, embers, bubbles",
+    )
 
     @field_validator("camera", mode="before")
     @classmethod
     def _normalize_camera(cls, value):
         return CameraMotion.parse(value).value
+
+    @field_validator("ambient", mode="before")
+    @classmethod
+    def _normalize_ambient(cls, value):
+        from pixelle_video.services.animation_fx.particles import normalize_effect
+
+        return normalize_effect(value)
 
 
 class AnimationScript(BaseModel):
