@@ -20,6 +20,7 @@ Currently, TTS service uses ComfyUI workflows only.
 import asyncio
 import ssl
 import random
+from typing import Optional
 import certifi
 import edge_tts as edge_tts_sdk
 from edge_tts.exceptions import NoAudioReceived
@@ -29,6 +30,23 @@ from aiohttp import WSServerHandshakeError, ClientResponseError
 
 # Use certifi bundle for SSL verification instead of disabling it
 _USE_CERTIFI_SSL = True
+
+_EDGE_TTS_HOST = "speech.platform.bing.com"
+
+
+def get_edge_tts_proxy() -> Optional[str]:
+    """
+    Return the system HTTPS proxy for Edge TTS, honoring NO_PROXY.
+
+    edge-tts uses aiohttp, which ignores HTTPS_PROXY unless a proxy is passed
+    explicitly; without this, Edge TTS fails on proxy-only networks.
+    """
+    import urllib.request
+
+    if urllib.request.proxy_bypass(_EDGE_TTS_HOST):
+        return None
+    proxies = urllib.request.getproxies()
+    return proxies.get("https") or proxies.get("all") or None
 
 # Retry configuration for Edge TTS (to handle 401 errors and NoAudioReceived)
 _RETRY_COUNT = 5           # Default retry count
@@ -157,6 +175,7 @@ async def edge_tts(
                     rate=rate,
                     volume=volume,
                     pitch=pitch,
+                    proxy=get_edge_tts_proxy(),
                 )
                 
                 # Collect audio chunks
