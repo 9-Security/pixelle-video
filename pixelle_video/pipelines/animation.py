@@ -237,7 +237,7 @@ class AnimationPipeline(StandardPipeline):
         script = await self._call_script_llm(prompt)
         script = self._normalize_script(script, params["n_scenes"], params.get("mode", "generate"))
         if params.get("proofread", True):
-            await self._proofread_narrations(script)
+            await self._proofread_narrations(script, timeout=float(params.get("proofread_timeout", 30)))
 
         ctx.extras["animation_script"] = script
         ctx.narrations = [scene.narration for scene in script.scenes]
@@ -266,7 +266,7 @@ class AnimationPipeline(StandardPipeline):
                     await asyncio.sleep(min(10.0, 2.0 * attempt))
         raise RuntimeError(f"Failed to generate animation script: {last_error}")
 
-    async def _proofread_narrations(self, script: AnimationScript):
+    async def _proofread_narrations(self, script: AnimationScript, timeout: float = 30.0):
         """
         Second LLM pass that fixes misspelled / merged character names and typos.
 
@@ -278,7 +278,14 @@ class AnimationPipeline(StandardPipeline):
         originals = [scene.narration for scene in script.scenes]
         prompt = build_proofread_prompt(originals, [c.spoken_name() for c in script.characters])
         try:
-            result = await self.llm(prompt=prompt, response_type=ProofreadResult, temperature=0.0, max_tokens=4000)
+            # Best-effort: never let a slow LLM hold up the whole video
+            result = await asyncio.wait_for(
+                self.llm(prompt=prompt, response_type=ProofreadResult, temperature=0.0, max_tokens=2000),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Narration proofread skipped: no answer within {timeout:.0f}s")
+            return
         except Exception as e:
             logger.warning(f"Narration proofread skipped: {e}")
             return

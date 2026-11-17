@@ -649,3 +649,16 @@ async def test_prefetch_runs_scenes_concurrently(monkeypatch, tmp_path):
         assert all(f.image_path and f.audio_path for f in ctx.storyboard.frames)
     finally:
         shutil.rmtree(ctx.task_dir, ignore_errors=True)
+
+
+
+async def test_proofread_times_out_without_blocking(monkeypatch):
+    import asyncio
+
+    async def slow(prompt, response_type=None, **kwargs):
+        await asyncio.sleep(5)
+
+    pipeline = await _pipeline_with_llm(monkeypatch, slow)
+    script = _cjk_script()
+    await pipeline._proofread_narrations(script, timeout=0.1)
+    assert script.scenes[0].narration == "夜深了，小福狸縮在樹洞裡發抖"   # unchanged, returned quickly
