@@ -84,6 +84,7 @@ async def generate_animation_sync(
             "scene": e.scene_index + 1,
             "prompt": e.prompt,
             "safety_blocked": e.safety_blocked,
+            "quota_exhausted": e.quota_exhausted,
             "script_url": path_to_url(request, e.script_path) if e.script_path else None,
         })
     except ValueError as e:

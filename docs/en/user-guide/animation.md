@@ -73,6 +73,17 @@ or talk: that needs `motion_mode="ai_video"` with a video model.
 Rate limits (HTTP 429) and 5xx errors are retried with exponential backoff; 401/403 fail fast.
 Check Cloudflare's current free allowance before large batches.
 
+## Cloudflare free daily allowance
+
+Workers AI's free plan has a daily allowance (10,000 neurons, reset at 00:00 UTC).
+Pixelle keeps an **estimated** per-day counter in `~/.cache/pixelle-video/usage/cloudflare.json`
+(`PIXELLE_USAGE_DIR` to relocate) and logs it after every image, warning above 80%.
+The estimate (~77 neurons per 1024x1024 FLUX schnell image, i.e. roughly 130 images or ~26
+five-scene videos per day) is approximate; tune it with `CLOUDFLARE_NEURONS_PER_TILE`,
+`CLOUDFLARE_NEURONS_PER_STEP` and `CLOUDFLARE_DAILY_NEURONS`. When the allowance is used up,
+generation stops immediately with a clear message (no retries); the saved script can be reused
+after the reset.
+
 ## When a scene is rejected by the image model
 
 Image models apply their own safety filters, which occasionally reject harmless prompts

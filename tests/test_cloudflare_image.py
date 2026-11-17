@@ -173,3 +173,58 @@ async def test_media_service_routes_cloudflare(monkeypatch, tmp_path):
         assert Image.open(result.url).size == (512, 288)
     finally:
         config_manager.set_api_provider_config("cloudflare", original)
+
+
+# ---------------------------------------------------------------- daily quota
+
+async def test_daily_quota_fails_fast_without_retries(monkeypatch, tmp_path):
+    from pixelle_video.services.api_services.image_cloudflare import CloudflareQuotaExceeded
+
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(429, json={"errors": [{"message": "AiError: you have used up your daily free "
+                                                                "allocation of 10,000 neurons, please upgrade"}]})
+
+    _patch_transport(monkeypatch, handler)
+    with pytest.raises(CloudflareQuotaExceeded, match="resets at 00:00 UTC"):
+        await CloudflareImageClient("acc", "tok").generate_image("a fox", str(tmp_path / "o.png"))
+    assert calls["n"] == 1
+
+
+async def test_plain_rate_limit_is_still_retried(monkeypatch, tmp_path):
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, text="Too many requests")
+        return httpx.Response(200, content=_png(), headers={"content-type": "image/png"})
+
+    _patch_transport(monkeypatch, handler)
+    await CloudflareImageClient("acc", "tok").generate_image("a fox", str(tmp_path / "o.png"))
+    assert calls["n"] == 2
+
+
+async def test_usage_counter_records_images(monkeypatch, tmp_path):
+    from pixelle_video.services.api_services import cloudflare_usage
+
+    _patch_transport(monkeypatch, lambda r: httpx.Response(200, content=_png(), headers={"content-type": "image/png"}))
+    client = CloudflareImageClient("acc", "tok")
+    for i in range(2):
+        await client.generate_image("a fox", str(tmp_path / f"o{i}.png"), model="flux-1-schnell")
+    usage = cloudflare_usage.today_usage()
+    assert usage["images"] == 2
+    expected = 2 * cloudflare_usage.estimate_neurons(1024, 1024, 6)
+    assert usage["neurons_estimate"] == pytest.approx(expected, abs=0.2)
+
+
+def test_estimate_and_warning(monkeypatch, tmp_path):
+    from pixelle_video.services.api_services import cloudflare_usage
+
+    assert cloudflare_usage.estimate_neurons(1024, 1024, 6) == pytest.approx(4 * 4.8 + 6 * 9.6)
+    monkeypatch.setattr(cloudflare_usage, "FREE_DAILY_NEURONS", 100)
+    path = tmp_path / "u.json"
+    day = cloudflare_usage.record_image(1024, 1024, 6, path=path)
+    assert day["ratio"] > 0.7 and json.loads(path.read_text())[day["date"]]["images"] == 1

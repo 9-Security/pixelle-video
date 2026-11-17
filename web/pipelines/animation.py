@@ -411,6 +411,9 @@ class AnimationPipelineUI(PipelineUI):
         if not isinstance(error, SceneMediaError):
             st.error(tr("status.error", error=str(error)))
             return
+        if error.quota_exhausted:
+            st.error(tr("animation.quota_exhausted", scene=error.scene_index + 1))
+            return
         key = "animation.scene_blocked" if error.safety_blocked else "animation.scene_failed"
         st.error(tr(key, scene=error.scene_index + 1))
         st.code(error.prompt, language=None)

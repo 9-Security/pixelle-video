@@ -66,6 +66,14 @@
 
 遇到限流（HTTP 429）或 5xx 会指数退避重试；401/403 会直接报错。大批量生成前请先确认 Cloudflare 当前的免费额度。
 
+## Cloudflare 每日免费额度
+
+Workers AI 免费方案每日有额度（10,000 neurons，UTC 00:00 重置）。Pixelle 会在
+`~/.cache/pixelle-video/usage/cloudflare.json`（可用 `PIXELLE_USAGE_DIR` 改位置）记录**估算**的每日用量，
+每张图后写入日志，超过 80% 会警告。估算值（FLUX schnell 1024x1024 每张约 77 neurons，约每日 130 张、
+26 支 5 分镜视频）仅供参考，可用 `CLOUDFLARE_NEURONS_PER_TILE`、`CLOUDFLARE_NEURONS_PER_STEP`、
+`CLOUDFLARE_DAILY_NEURONS` 调整。额度用完时会立即停止并给出明确提示（不再重试），重置后可用已保存的剧本重新生成。
+
 ## 分镜被图像模型拒绝时
 
 图像模型有自己的安全过滤器，偶尔会误拒无害的提示词（例如 Cloudflare FLUX 对部分「cute … anime」组合）。

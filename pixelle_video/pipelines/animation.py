@@ -69,6 +69,17 @@ MAX_SCENES = 30
 IMAGE_TEMPLATE_INTENSITY_FACTOR = 0.5
 
 
+def _is_quota_exhausted(error) -> bool:
+    """True if the error (or its causes) says a provider's usage allowance is used up."""
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if getattr(error, "quota_exhausted", False) or "daily free allocation" in str(error).lower():
+            return True
+        error = error.__cause__ or error.__context__
+    return False
+
+
 def _flatten_exceptions(error: BaseException):
     """Yield leaf exceptions of a (nested) exception group."""
     if isinstance(error, BaseExceptionGroup):
@@ -100,16 +111,21 @@ class SceneMediaError(RuntimeError):
         self.prompt = prompt
         self.script_path = script_path
         self.safety_blocked = is_content_policy_rejection(cause)
-        reason = (
-            "rejected by the image model's safety filter (this can be a false positive)"
-            if self.safety_blocked else f"failed: {cause}"
-        )
+        self.quota_exhausted = _is_quota_exhausted(cause)
+        if self.quota_exhausted:
+            reason = "stopped: the image provider's daily free allowance is used up (resets at 00:00 UTC)"
+        elif self.safety_blocked:
+            reason = "rejected by the image model's safety filter (this can be a false positive)"
+        else:
+            reason = f"failed: {cause}"
         # Public message: no server paths (it is returned to API clients)
-        self.public_message = (
-            f"Scene {scene_index + 1} image generation {reason}. "
+        action = (
+            "Regenerate with the saved animation script after the reset, or choose another image model."
+            if self.quota_exhausted else
             f"Edit scene {scene_index + 1} (its 'visual' text or the character 'appearance') "
             f"in the saved animation script and regenerate with it."
         )
+        self.public_message = f"Scene {scene_index + 1} image generation {reason}. {action}"
         hint = f" The script was saved to {script_path}." if script_path else ""
         super().__init__(f"Scene {scene_index + 1} image generation {reason}. Prompt: {prompt[:400]!r}.{hint}")
 

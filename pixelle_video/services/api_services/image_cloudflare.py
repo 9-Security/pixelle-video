@@ -90,6 +90,17 @@ def resolve_model_id(name: str) -> str:
     return CLOUDFLARE_MODEL_ALIASES.get(name, name)
 
 
+class CloudflareQuotaExceeded(RuntimeError):
+    """The account's daily Workers AI allowance is used up (not retried)."""
+
+    quota_exhausted = True
+
+
+def is_daily_quota_error(status_code: int, body: str) -> bool:
+    text = (body or "").lower()
+    return status_code == 429 and ("daily free allocation" in text or "neurons" in text)
+
+
 class CloudflareAPIError(RuntimeError):
     """Raised for non-retryable or exhausted Cloudflare API failures."""
 
@@ -240,6 +251,11 @@ class CloudflareImageClient:
                     if response.status_code < 400:
                         return response
                     detail = response.text[:300]
+                    if is_daily_quota_error(response.status_code, response.text):
+                        raise CloudflareQuotaExceeded(
+                            "Cloudflare Workers AI daily free allocation is used up; it resets at 00:00 UTC. "
+                            f"Detail: {detail}"
+                        )
                     if response.status_code in (401, 403):
                         raise CloudflareAPIError(
                             f"Cloudflare authentication failed ({response.status_code}). Check that the "
@@ -295,4 +311,11 @@ class CloudflareImageClient:
             path = path.with_suffix(".png")
         image.save(path)
         logger.success(f"Cloudflare image saved: {path} ({image.size[0]}x{image.size[1]})")
+        try:
+            from pixelle_video.services.api_services.cloudflare_usage import record_image
+
+            gen_w, gen_h = (payload.get("width"), payload.get("height"))
+            record_image(gen_w or 1024, gen_h or 1024, int(payload.get("steps") or payload.get("num_steps") or 1))
+        except Exception as e:  # usage tracking must never break generation
+            logger.debug(f"Cloudflare usage tracking failed: {e}")
         return str(path.resolve())

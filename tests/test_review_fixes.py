@@ -255,3 +255,17 @@ async def test_segmentation_is_serialized_during_prefetch(monkeypatch, tmp_path)
         assert sorted(ctx.extras["masks"]) == [0, 1, 2, 3]
     finally:
         shutil.rmtree(ctx.task_dir, ignore_errors=True)
+
+
+def test_scene_error_reports_quota_exhaustion():
+    from pixelle_video.services.api_services.image_cloudflare import CloudflareQuotaExceeded
+
+    try:
+        try:
+            raise CloudflareQuotaExceeded("Cloudflare Workers AI daily free allocation is used up")
+        except CloudflareQuotaExceeded as inner:
+            raise RuntimeError("wrapped") from inner
+    except RuntimeError as outer:
+        err = SceneMediaError(0, "p", outer, None)
+    assert err.quota_exhausted and not err.safety_blocked
+    assert "00:00 UTC" in err.public_message and "Edit scene" not in err.public_message
