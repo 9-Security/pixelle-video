@@ -678,3 +678,47 @@ def test_strip_names_common_word_names_and_no_rematch():
     chars2 = [AnimationCharacter(name="Kit", appearance="x", descriptor="the fox cub"),
               AnimationCharacter(name="fox", appearance="y", descriptor="an old wolf")]
     assert _strip_names("Kit runs", chars2) == "the fox cub runs"
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+def test_async_api_reports_progress_and_output_id(monkeypatch, tmp_path):
+    """The async endpoint exposes live progress and a result with output_id."""
+    import time as _time
+
+    from fastapi.testclient import TestClient
+
+    from api.app import app
+    from api.dependencies import get_pixelle_video
+    from pixelle_video.models.progress import ProgressEvent
+
+    seen = {}
+
+    class FakeCore:
+        async def generate_video(self, text, pipeline, progress_callback=None, **kwargs):
+            seen["kwargs"] = kwargs
+            progress_callback(ProgressEvent(event_type="frame_step", progress=0.5, frame_current=2,
+                                            frame_total=4, action="media"))
+            out = tmp_path / "20261117_000000_abcd"
+            out.mkdir()
+            video = out / "final.mp4"
+            video.write_bytes(b"x")
+            storyboard = type("SB", (), {"title": "T"})()
+            return type("R", (), {"video_path": str(video), "duration": 1.0, "file_size": 1,
+                                  "storyboard": storyboard})()
+
+    app.dependency_overrides[get_pixelle_video] = lambda: FakeCore()
+    try:
+        client = TestClient(app)
+        r = client.post("/api/animation/generate/async", json={"text": "fox", "media_workflow": "api/x"})
+        assert r.status_code == 200
+        task_id = r.json()["task_id"]
+        for _ in range(50):
+            task = client.get(f"/api/tasks/{task_id}").json()
+            if task["status"] in ("completed", "failed"):
+                break
+            _time.sleep(0.05)
+        assert task["status"] == "completed", task
+        assert task["progress"]["current"] == 50 and task["progress"]["message"] == "media 2/4"
+        assert task["result"]["output_id"] == "20261117_000000_abcd"
+    finally:
+        app.dependency_overrides.clear()

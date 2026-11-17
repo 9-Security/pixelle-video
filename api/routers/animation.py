@@ -56,12 +56,21 @@ def _build_params(body: AnimationGenerateRequest) -> dict:
     return params
 
 
-async def _run(pixelle_video, body: AnimationGenerateRequest, request: Request) -> dict:
+def _progress_message(event) -> str:
+    """Short machine-friendly progress label, e.g. 'media 2/5' or 'concatenating'."""
+    label = event.action or event.event_type
+    if event.frame_current and event.frame_total:
+        label += f" {event.frame_current}/{event.frame_total}"
+    return label
+
+
+async def _run(pixelle_video, body: AnimationGenerateRequest, request: Request, progress_callback=None) -> dict:
     result = await pixelle_video.generate_video(
-        text=body.text, pipeline="animation", **_build_params(body)
+        text=body.text, pipeline="animation", progress_callback=progress_callback, **_build_params(body)
     )
     script_path = Path(result.video_path).parent / "animation_script.json"
     return {
+        "output_id": Path(result.video_path).parent.name,
         "video_url": path_to_url(request, result.video_path),
         "duration": result.duration,
         "file_size": result.file_size,
@@ -106,8 +115,16 @@ async def generate_animation_async(
             request_params={"pipeline": "animation", **body.model_dump()},
         )
 
+        def on_progress(event):
+            task_manager.update_progress(task.task_id, int(round(event.progress * 100)), 100,
+                                         _progress_message(event))
+
         async def execute():
-            return await _run(pixelle_video, body, request)
+            try:
+                return await _run(pixelle_video, body, request, progress_callback=on_progress)
+            except SceneMediaError as e:
+                # Task errors are returned to API clients: use the path-free message
+                raise RuntimeError(e.public_message) from e
 
         await task_manager.execute_task(task_id=task.task_id, coro_func=execute)
         return AnimationGenerateAsyncResponse(task_id=task.task_id)
