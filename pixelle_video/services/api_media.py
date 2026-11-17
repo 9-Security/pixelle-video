@@ -7,6 +7,7 @@
 import asyncio
 from copy import deepcopy
 import os
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -28,6 +29,12 @@ class APIProviderMediaService:
         ],
         "openai": [
             "gpt-image-2",
+        ],
+        "cloudflare": [
+            "flux-1-schnell",
+            "sdxl-lightning",
+            "sdxl-base-1.0",
+            "dreamshaper-8-lcm",
         ],
         "seedream": [
             "doubao-seedream-5-0-260128",
@@ -477,7 +484,11 @@ class APIProviderMediaService:
         image_paths: Optional[list[str]] = None,
         **params,
     ) -> MediaResult:
-        from pixelle_video.services.api_services.image_client import ImageClient
+        if provider == "cloudflare":
+            return await self._generate_cloudflare_image(
+                model=model, prompt=prompt, width=width, height=height,
+                output_path=output_path, image_paths=image_paths, **params,
+            )
 
         client = self._create_image_client()
         save_dir = self._save_dir(output_path, "api_images")
@@ -507,6 +518,43 @@ class APIProviderMediaService:
             result_path = output_path
 
         return MediaResult(media_type="image", url=result_path)
+
+    async def _generate_cloudflare_image(
+        self,
+        model: str,
+        prompt: str,
+        width: Optional[int],
+        height: Optional[int],
+        output_path: Optional[str],
+        image_paths: Optional[list[str]] = None,
+        **params,
+    ) -> MediaResult:
+        """Text-to-image via Cloudflare Workers AI (reference images are not supported)."""
+        from pixelle_video.services.api_services.image_cloudflare import CloudflareImageClient
+
+        if image_paths:
+            logger.warning("Cloudflare Workers AI image models are text-to-image only; ignoring reference images")
+        cfg = config_manager.get_api_providers_config()
+        cf_cfg = cfg.get("cloudflare", {})
+        local_proxy = cfg["common"].get("local_proxy") or None
+        client = CloudflareImageClient(
+            account_id=cf_cfg.get("account_id", ""),
+            api_token=cf_cfg.get("api_token", ""),
+            base_url=cf_cfg.get("base_url") or None,
+            local_proxy=local_proxy if cf_cfg.get("use_proxy") else None,
+        )
+        target = output_path or os.path.join(self._save_dir(None, "api_images"), f"cloudflare_{uuid.uuid4().hex[:8]}.png")
+        path = await client.generate_image(
+            prompt=prompt,
+            output_path=target,
+            model=model,
+            width=width,
+            height=height,
+            steps=params.get("steps"),
+            seed=params.get("seed"),
+            negative_prompt=params.get("negative_prompt"),
+        )
+        return MediaResult(media_type="image", url=path)
 
     async def _generate_video(
         self,

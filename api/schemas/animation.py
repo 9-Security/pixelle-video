@@ -14,7 +14,7 @@
 
 from typing import Any, Dict, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AnimationGenerateRequest(BaseModel):
@@ -51,18 +51,17 @@ class AnimationGenerateRequest(BaseModel):
     bgm_path: Optional[str] = None
     bgm_volume: float = Field(0.2, ge=0.0, le=1.0)
 
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "text": "A little fox afraid of the dark sets out to bring the moon back",
-                "n_scenes": 5,
-                "art_style": "watercolor",
-                "motion_mode": "camera",
-                "media_workflow": "runninghub/image_flux.json",
-                "frame_template": "1080x1920/video_default.html",
-                "tts_voice": "zh-CN-XiaoxiaoNeural",
-            }
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "text": "A little fox afraid of the dark sets out to bring the moon back",
+            "n_scenes": 5,
+            "art_style": "watercolor",
+            "motion_mode": "camera",
+            "media_workflow": "api/cloudflare/flux-1-schnell",
+            "frame_template": "1080x1920/video_default.html",
+            "tts_voice": "zh-CN-XiaoxiaoNeural",
         }
+    })
 
 
 class AnimationGenerateResponse(BaseModel):

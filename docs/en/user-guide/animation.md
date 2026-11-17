@@ -32,6 +32,25 @@ prefix in every scene prompt, so it works with any image model without LoRA or r
 
 `video_*` templates are recommended: the image is animated underneath and subtitles stay fixed.
 
+## Free setup: Gemini + Cloudflare Workers AI
+
+1. **LLM** – Settings → LLM preset **Gemini**, paste a Google AI Studio API key
+   (base URL `https://generativelanguage.googleapis.com/v1beta/openai/`, model `gemini-2.5-flash`).
+2. **Images** – Settings → API Media Models → **Cloudflare Workers AI**: fill in the Account ID and an
+   API token with *Workers AI* permission. Then choose source **API models** and
+   `flux-1-schnell - API Cloudflare` in the Animation tab (workflow key `api/cloudflare/flux-1-schnell`).
+3. **Voice** – local Edge-TTS needs no key.
+
+| Workflow key | Model | Notes |
+|---|---|---|
+| `api/cloudflare/flux-1-schnell` | `@cf/black-forest-labs/flux-1-schnell` | Best quality; fixed square output, center-cropped to the template size |
+| `api/cloudflare/sdxl-lightning` | `@cf/bytedance/stable-diffusion-xl-lightning` | Fast; native width/height |
+| `api/cloudflare/sdxl-base-1.0` | `@cf/stabilityai/stable-diffusion-xl-base-1.0` | Slower; native width/height |
+| `api/cloudflare/dreamshaper-8-lcm` | `@cf/lykon/dreamshaper-8-lcm` | Native width/height |
+
+Rate limits (HTTP 429) and 5xx errors are retried with exponential backoff; 401/403 fail fast.
+Check Cloudflare's current free allowance before large batches.
+
 ## Web UI
 
 Open the **🎞️ Animation** tab, enter a story idea, choose an art style, an animation mode, an
@@ -48,7 +67,7 @@ curl -X POST http://localhost:8000/api/animation/generate/async \
         "n_scenes": 5,
         "art_style": "watercolor",
         "motion_mode": "camera",
-        "media_workflow": "runninghub/image_flux.json",
+        "media_workflow": "api/cloudflare/flux-1-schnell",
         "frame_template": "1080x1920/video_default.html",
         "tts_voice": "en-US-AriaNeural"
       }'

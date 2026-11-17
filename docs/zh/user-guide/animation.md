@@ -31,6 +31,23 @@
 
 推荐使用 `video_*` 模板：画面在下层运动，字幕保持固定。
 
+## 免费方案：Gemini + Cloudflare Workers AI
+
+1. **LLM**：系统配置 → LLM 预设选 **Gemini**，填入 Google AI Studio API Key
+   （Base URL `https://generativelanguage.googleapis.com/v1beta/openai/`，模型 `gemini-2.5-flash`）。
+2. **图片**：系统配置 → API 媒体模型 → **Cloudflare Workers AI**，填入 Account ID 与具备 *Workers AI* 权限的 API Token；
+   然后在动画生成页选择来源 **API 模型** 与 `flux-1-schnell - API Cloudflare`（工作流 key：`api/cloudflare/flux-1-schnell`）。
+3. **配音**：本地 Edge-TTS 无需 Key。
+
+| 工作流 key | 模型 | 说明 |
+|---|---|---|
+| `api/cloudflare/flux-1-schnell` | `@cf/black-forest-labs/flux-1-schnell` | 画质最佳；固定方图输出，自动居中裁切为模板尺寸 |
+| `api/cloudflare/sdxl-lightning` | `@cf/bytedance/stable-diffusion-xl-lightning` | 速度快；支持指定宽高 |
+| `api/cloudflare/sdxl-base-1.0` | `@cf/stabilityai/stable-diffusion-xl-base-1.0` | 较慢；支持指定宽高 |
+| `api/cloudflare/dreamshaper-8-lcm` | `@cf/lykon/dreamshaper-8-lcm` | 支持指定宽高 |
+
+遇到限流（HTTP 429）或 5xx 会指数退避重试；401/403 会直接报错。大批量生成前请先确认 Cloudflare 当前的免费额度。
+
 ## Web 界面
 
 打开 **🎞️ 动画生成** 标签页，输入故事创意，选择画风、动画方式、图片（或视频）工作流与配音音色，点击 **生成动画**。生成完成后，视频下方会显示动画剧本（角色与分镜），并可下载 JSON。
@@ -45,7 +62,7 @@ curl -X POST http://localhost:8000/api/animation/generate/async \
         "n_scenes": 5,
         "art_style": "watercolor",
         "motion_mode": "camera",
-        "media_workflow": "runninghub/image_flux.json",
+        "media_workflow": "api/cloudflare/flux-1-schnell",
         "frame_template": "1080x1920/video_default.html",
         "tts_voice": "zh-CN-XiaoxiaoNeural"
       }'

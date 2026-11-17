@@ -47,6 +47,14 @@ class AccessSecretProviderConfig(BaseModel):
     use_proxy: bool = Field(default=False, description="Route provider requests through common local proxy")
 
 
+class CloudflareProviderConfig(BaseModel):
+    """Cloudflare Workers AI settings"""
+    account_id: str = Field(default="", description="Cloudflare account ID")
+    api_token: str = Field(default="", description="Cloudflare API token with Workers AI permission")
+    base_url: str = Field(default="https://api.cloudflare.com/client/v4", description="Cloudflare API base URL")
+    use_proxy: bool = Field(default=False, description="Route provider requests through common local proxy")
+
+
 class APIProvidersConfig(BaseModel):
     """Direct model provider API configuration"""
     common: APIProviderCommonConfig = Field(default_factory=APIProviderCommonConfig)
@@ -56,6 +64,7 @@ class APIProvidersConfig(BaseModel):
     gemini: APIKeyProviderConfig = Field(default_factory=APIKeyProviderConfig)
     ark: APIKeyProviderConfig = Field(default_factory=APIKeyProviderConfig)
     kling: AccessSecretProviderConfig = Field(default_factory=AccessSecretProviderConfig)
+    cloudflare: CloudflareProviderConfig = Field(default_factory=CloudflareProviderConfig)
 
 
 class TTSLocalConfig(BaseModel):

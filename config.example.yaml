@@ -40,6 +40,11 @@ api_providers:
     access_key: ""
     secret_key: ""
     use_proxy: false
+  cloudflare:  # Cloudflare Workers AI text-to-image (workflow keys: api/cloudflare/<model>)
+    account_id: ""
+    api_token: ""  # API token with Workers AI permission
+    base_url: "https://api.cloudflare.com/client/v4"
+    use_proxy: false
 
 # ==================== ComfyUI Configuration ====================
 comfyui:

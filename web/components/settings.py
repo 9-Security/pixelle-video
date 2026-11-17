@@ -300,11 +300,13 @@ def render_advanced_settings():
         dashscope_cfg = api_cfg.get("dashscope", {})
         ark_cfg = api_cfg.get("ark", {})
         kling_cfg = api_cfg.get("kling", {})
+        cloudflare_cfg = api_cfg.get("cloudflare", {})
         default_api_base_urls = {
             "openai": "https://api.openai.com/v1",
             "dashscope": "https://dashscope.aliyuncs.com/api/v1",
             "ark": "https://ark.cn-beijing.volces.com/api/v3",
             "kling": "https://api-beijing.klingai.com",
+            "cloudflare": "https://api.cloudflare.com/client/v4",
         }
 
         with st.container(border=True):
@@ -426,6 +428,35 @@ def render_advanced_settings():
                     type="password",
                     key="api_media_kling_secret_key",
                 )
+
+                st.markdown("**Cloudflare Workers AI**")
+                st.caption(
+                    "免费额度可用的文生图（FLUX.1 schnell / SDXL）。Token 需具备 Workers AI 权限。"
+                    if zh
+                    else "Text-to-image with a free daily allowance (FLUX.1 schnell / SDXL). The token needs Workers AI permission."
+                )
+                api_cloudflare_use_proxy = st.checkbox(
+                    "Cloudflare 启用代理" if zh else "Use proxy for Cloudflare",
+                    value=bool(cloudflare_cfg.get("use_proxy", False)),
+                    key="api_media_cloudflare_use_proxy",
+                )
+                api_cloudflare_account_id = st.text_input(
+                    "Cloudflare Account ID",
+                    value=cloudflare_cfg.get("account_id", ""),
+                    key="api_media_cloudflare_account_id",
+                )
+                api_cloudflare_api_token = st.text_input(
+                    "Cloudflare API Token",
+                    value=cloudflare_cfg.get("api_token", ""),
+                    type="password",
+                    key="api_media_cloudflare_api_token",
+                )
+                api_cloudflare_base_url = st.text_input(
+                    "Cloudflare Base URL",
+                    value=cloudflare_cfg.get("base_url") or default_api_base_urls["cloudflare"],
+                    placeholder=default_api_base_urls["cloudflare"],
+                    key="api_media_cloudflare_base_url",
+                )
         
         # ====================================================================
         # Action Buttons (full width at bottom)
@@ -478,6 +509,12 @@ def render_advanced_settings():
                         "access_key": api_kling_access_key or "",
                         "secret_key": api_kling_secret_key or "",
                         "use_proxy": bool(api_kling_use_proxy),
+                    })
+                    config_manager.set_api_provider_config("cloudflare", {
+                        "account_id": (api_cloudflare_account_id or "").strip(),
+                        "api_token": (api_cloudflare_api_token or "").strip(),
+                        "base_url": api_cloudflare_base_url or "",
+                        "use_proxy": bool(api_cloudflare_use_proxy),
                     })
                     
                     # Only save to file if LLM config is valid
