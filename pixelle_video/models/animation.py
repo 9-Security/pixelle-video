@@ -82,6 +82,27 @@ class AnimationCharacter(BaseModel):
             "body shape, hair, clothing, colors and distinctive features"
         )
     )
+    descriptor: str = Field(
+        default="",
+        description="Short English noun phrase WITHOUT the name, e.g. 'a small red fox with a teal scarf'",
+    )
+
+    def visual_label(self) -> str:
+        """
+        Name-free phrase used in image prompts (image models tend to draw names as text).
+
+        Uses `descriptor`, else the first clause of `appearance` (max 10 words).
+        """
+        label = (self.descriptor or "").strip()
+        if not label:
+            first = (self.appearance or "").split(",")[0].split(".")[0].strip()
+            label = " ".join(first.split()[:10]) or "a character"
+        first_word = label.split()[0]
+        if first_word.lower() in ("a", "an", "the"):
+            label = first_word.lower() + label[len(first_word):]
+        else:
+            label = "the " + label
+        return label
 
     def spoken_name(self) -> str:
         """Name used in narration (falls back to `name`)."""

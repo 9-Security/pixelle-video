@@ -19,6 +19,7 @@ Keeping a fixed character sheet and a fixed style prefix is what gives the
 generated images visual consistency across scenes.
 """
 
+import re
 from typing import Dict, Iterable, List, Optional
 
 from pixelle_video.models.animation import AnimationCharacter, AnimationScene
@@ -120,7 +121,9 @@ _COMMON_RULES = """# Output Rules
    Each character has TWO names that refer to the same character:
    - "display_name": the name spoken in narration, in the narration language (e.g. 皮皮 for Chinese input).
    - "name": a short ASCII romanization of display_name used only in English fields (e.g. Pipi).
+   - "descriptor": a short English noun phrase WITHOUT any name (e.g. "a small red fox with a teal scarf").
    Narration MUST call each character only by its exact "display_name" (never "name", never a nickname).
+   Never alter, shorten or merge a display_name with other words (e.g. do not blend it with the species).
    If the story has no characters (e.g. landscapes), return an empty list.
 3. Scenes: each scene is one shot.
    - "narration": voice-over text, {min_words}~{max_words} words, natural spoken rhythm, no ending punctuation.
@@ -207,17 +210,36 @@ def build_animation_script_prompt(
 # Per-scene media prompts
 # ----------------------------------------------------------------------------
 
+NO_TEXT_GUARD = "no text, no letters, no words, no captions, no signature, no watermark"
+
+
+def _scene_characters(scene: AnimationScene, characters: Iterable[AnimationCharacter]) -> List[AnimationCharacter]:
+    by_name = {c.name.strip().lower(): c for c in characters}
+    found = []
+    for name in scene.characters:
+        character = by_name.get(str(name).strip().lower())
+        if character and character not in found:
+            found.append(character)
+    return found
+
+
+def _strip_names(text: str, characters: Iterable[AnimationCharacter]) -> str:
+    """Replace character names with name-free visual labels."""
+    for character in sorted(characters, key=lambda c: len(c.name), reverse=True):
+        for name in {character.name.strip(), character.spoken_name()}:
+            if not name:
+                continue
+            pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(name)}(?:'s)?(?![A-Za-z0-9])", re.IGNORECASE)
+            text = pattern.sub(lambda m: character.visual_label() + ("'s" if m.group(0).lower().endswith("'s") else ""),
+                               text)
+    return text
+
+
 def _character_anchors(
     scene: AnimationScene, characters: Iterable[AnimationCharacter]
 ) -> List[str]:
-    """Return 'Name: appearance' anchors for characters present in the scene."""
-    by_name = {c.name.strip().lower(): c for c in characters}
-    anchors = []
-    for name in scene.characters:
-        character = by_name.get(str(name).strip().lower())
-        if character:
-            anchors.append(f"{character.name} ({character.appearance.strip()})")
-    return anchors
+    """Full appearance of each character in the scene, without names."""
+    return [c.appearance.strip() for c in _scene_characters(scene, characters) if c.appearance.strip()]
 
 
 def composition_hint(width: Optional[int], height: Optional[int]) -> str:
@@ -250,13 +272,15 @@ def build_scene_image_prompt(
     first and repeating the full character description in every scene is the
     simplest model-agnostic way to keep the look consistent.
     """
-    parts = [style_prompt.strip(), scene.visual.strip()]
+    characters = list(characters)
+    parts = [style_prompt.strip(), _strip_names(scene.visual.strip(), characters)]
     anchors = _character_anchors(scene, characters)
     if anchors:
-        parts.append("Characters: " + "; ".join(anchors))
+        label = "Character" if len(anchors) == 1 else f"{len(anchors)} characters"
+        parts.append(f"{label}: " + "; ".join(anchors))
     if composition:
         parts.append(composition)
-    parts.append("consistent character design, no text, no watermark")
+    parts.append(f"consistent character design, {NO_TEXT_GUARD}")
     return ", ".join(p for p in parts if p)
 
 
@@ -270,8 +294,33 @@ def build_scene_video_prompt(
     base = build_scene_image_prompt(scene, characters, style_prompt, composition)
     extras = []
     if scene.motion:
-        extras.append(f"Motion: {scene.motion.strip()}")
+        extras.append(f"Motion: {_strip_names(scene.motion.strip(), list(characters))}")
     if scene.camera and scene.camera != "static":
         extras.append(f"Camera: {scene.camera.replace('_', ' ')}")
     extras.append("smooth animation")
     return base + ". " + ". ".join(extras)
+
+
+PROOFREAD_PROMPT = """# Task
+Proofread the narration lines of an animated story. Fix ONLY:
+- character names that are misspelled, shortened, merged with other words or replaced by nicknames:
+  each character must be called exactly by its official name below;
+- obvious typos.
+Do NOT rewrite, reorder, add or remove content, and keep each line's language, length and punctuation.
+Return the same number of lines, in the same order.
+
+# Official character names
+{names}
+
+# Narration lines (JSON array)
+{lines}
+"""
+
+
+def build_proofread_prompt(narrations: List[str], display_names: List[str]) -> str:
+    import json
+
+    return PROOFREAD_PROMPT.format(
+        names="\n".join(f"- {n}" for n in display_names) or "- (none)",
+        lines=json.dumps(narrations, ensure_ascii=False, indent=1),
+    )

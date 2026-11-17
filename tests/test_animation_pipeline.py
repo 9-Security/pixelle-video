@@ -97,9 +97,10 @@ def test_script_prompt_modes():
 def test_scene_prompt_includes_style_and_character_anchor():
     script = _script()
     prompt = build_scene_image_prompt(script.scenes[1], script.characters, "STYLE")
-    assert prompt.startswith("STYLE, owl on a branch")
-    assert "Owl (old grey owl with round glasses)" in prompt
-    assert "Unknown" not in prompt
+    # "owl" is also the character's name, so it becomes its name-free description
+    assert prompt.startswith("STYLE, the old grey owl with round glasses on a branch")
+    assert "Character: old grey owl with round glasses" in prompt
+    assert "Unknown" not in prompt and "no letters" in prompt
     video_prompt = build_scene_video_prompt(script.scenes[0], script.characters, "STYLE")
     assert "Motion: tail sways" in video_prompt and "Camera: zoom in" in video_prompt
 
@@ -191,7 +192,11 @@ async def test_animation_pipeline_end_to_end_with_mocks(tmp_path, monkeypatch):
     llm_calls = []
 
     async def fake_llm(prompt, response_type=None, **kwargs):
+        from pixelle_video.pipelines.animation import ProofreadResult
+
         llm_calls.append(prompt)
+        if response_type is ProofreadResult:   # proofreading pass: echo narrations back
+            return ProofreadResult(narrations=[s.narration for s in _script().scenes if s.narration.strip()][:2])
         assert response_type is AnimationScript
         return _script()
 
@@ -248,9 +253,10 @@ async def test_animation_pipeline_end_to_end_with_mocks(tmp_path, monkeypatch):
         assert len(result.storyboard.frames) == 2
         assert result.storyboard.title == "Little Fox"
         assert all(f.media_type == "video" for f in result.storyboard.frames)
-        assert len(llm_calls) == 1
+        assert len(llm_calls) == 2   # script + proofread
         assert media_prompts[0].startswith(ANIMATION_STYLE_PRESETS["watercolor"]["prompt"])
-        assert "Momo (small orange fox with a blue scarf)" in media_prompts[0]
+        assert "small orange fox with a blue scarf" in media_prompts[0]
+        assert "Momo" not in media_prompts[0]   # names are never sent to the image model
         assert result.duration > 2.0
         assert events and events[-1].event_type == "completed"
 
@@ -375,7 +381,7 @@ def test_narration_uses_display_names():
     assert normalized.characters[1].display_name == "Lumi"
     # Visual prompts keep ASCII names so image models are not fed CJK text
     prompt = build_scene_image_prompt(normalized.scenes[0], normalized.characters, "S")
-    assert "Pipi (orange fox)" in prompt and "皮皮" not in prompt
+    assert "orange fox" in prompt and "Pipi" not in prompt and "皮皮" not in prompt
 
 
 def test_script_prompt_requires_display_name():
@@ -462,7 +468,7 @@ async def test_blocked_scene_reports_prompt_and_saves_script(monkeypatch, tmp_pa
     err = exc.value
     try:
         assert err.scene_index == 0 and err.safety_blocked
-        assert "Momo (small orange fox with a blue scarf)" in err.prompt
+        assert "small orange fox with a blue scarf" in err.prompt
         assert "Scene 1" in str(err) and "safety filter" in str(err)
         saved = json.loads(Path(err.script_path).read_text(encoding="utf-8"))
         assert saved["script"]["title"] == "Little Fox" and len(saved["scene_prompts"]) == 2
@@ -522,3 +528,84 @@ def test_api_requires_text_or_script():
     r = client.post("/api/animation/generate/sync", json={"media_workflow": "a"})
     assert r.status_code == 422
     assert "text" in r.text and "script" in r.text
+
+
+
+# ---------------------------------------------------------------- name hygiene & proofreading
+
+def test_image_prompt_never_contains_names():
+    chars = [
+        AnimationCharacter(name="Fufu", display_name="福福", appearance="A small red fox with green eyes, teal scarf"),
+        AnimationCharacter(name="Gugu", appearance="old grey owl, round glasses", descriptor="a wise grey owl"),
+    ]
+    scene = AnimationScene(narration="n", visual="Fufu looks at Gugu's lantern; fufu smiles at 福福",
+                           motion="Fufu waves", characters=["Fufu", "Gugu"])
+    prompt = build_scene_video_prompt(scene, chars, "STYLE")
+    for name in ("Fufu", "fufu", "Gugu", "福福"):
+        assert name not in prompt
+    assert "a small red fox with green eyes looks at a wise grey owl's lantern" in prompt
+    assert "2 characters:" in prompt and "Motion: a small red fox with green eyes waves" in prompt
+
+
+def test_visual_label_fallbacks():
+    assert AnimationCharacter(name="X", appearance="Tall knight, silver armor").visual_label() == "the Tall knight"
+    assert AnimationCharacter(name="X", appearance="An owl. Old.").visual_label() == "an owl"
+    assert AnimationCharacter(name="X", appearance="z", descriptor="a fox").visual_label() == "a fox"
+
+
+async def _pipeline_with_llm(monkeypatch, responder):
+    from pixelle_video.service import PixelleVideoCore
+
+    core = PixelleVideoCore()
+    await core.initialize()
+    pipeline = core.pipelines["animation"]
+    monkeypatch.setattr(pipeline, "llm", responder)
+    return pipeline
+
+
+def _cjk_script():
+    return AnimationScript(
+        title="t",
+        characters=[AnimationCharacter(name="Fufu", display_name="福福", appearance="red fox")],
+        scenes=[
+            AnimationScene(narration="夜深了，小福狸縮在樹洞裡發抖", visual="v", characters=["Fufu"]),
+            AnimationScene(narration="福福鼓起勇氣走出樹洞", visual="v", characters=["Fufu"]),
+        ],
+    )
+
+
+async def test_proofread_fixes_merged_names(monkeypatch):
+    from pixelle_video.pipelines.animation import ProofreadResult
+
+    prompts = []
+
+    async def responder(prompt, response_type=None, **kwargs):
+        prompts.append(prompt)
+        return ProofreadResult(narrations=["夜深了，小狐狸福福縮在樹洞裡發抖", "福福鼓起勇氣走出樹洞"])
+
+    pipeline = await _pipeline_with_llm(monkeypatch, responder)
+    script = _cjk_script()
+    await pipeline._proofread_narrations(script)
+    assert script.scenes[0].narration == "夜深了，小狐狸福福縮在樹洞裡發抖"
+    assert "- 福福" in prompts[0] and "小福狸" in prompts[0]
+
+
+@pytest.mark.parametrize("reply", [
+    "too_long", "wrong_count", "error", "garbage",
+])
+async def test_proofread_guards_keep_original(monkeypatch, reply):
+    from pixelle_video.pipelines.animation import ProofreadResult
+
+    async def responder(prompt, response_type=None, **kwargs):
+        if reply == "error":
+            raise RuntimeError("503")
+        if reply == "garbage":
+            return "not a model"
+        if reply == "wrong_count":
+            return ProofreadResult(narrations=["只有一行"])
+        return ProofreadResult(narrations=["夜深了" * 10, "福福鼓起勇氣走出樹洞"])
+
+    pipeline = await _pipeline_with_llm(monkeypatch, responder)
+    script = _cjk_script()
+    await pipeline._proofread_narrations(script)
+    assert script.scenes[0].narration == "夜深了，小福狸縮在樹洞裡發抖"

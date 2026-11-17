@@ -34,9 +34,10 @@ import asyncio
 import json
 import re
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, List
 
 from loguru import logger
+from pydantic import BaseModel
 
 from pixelle_video.models.animation import AnimationScene, AnimationScript, CameraMotion
 from pixelle_video.models.progress import ProgressEvent
@@ -45,6 +46,7 @@ from pixelle_video.pipelines.linear import PipelineContext
 from pixelle_video.pipelines.standard import StandardPipeline
 from pixelle_video.prompts.animation_script import (
     build_animation_script_prompt,
+    build_proofread_prompt,
     build_scene_image_prompt,
     build_scene_video_prompt,
     composition_hint,
@@ -62,6 +64,12 @@ DEFAULT_TEMPLATE = "1080x1920/video_fullscreen.html"
 MAX_SCENES = 30
 # Text baked into image templates moves with the camera, so keep it gentler
 IMAGE_TEMPLATE_INTENSITY_FACTOR = 0.5
+
+
+class ProofreadResult(BaseModel):
+    """Structured output of the narration proofreading pass."""
+
+    narrations: List[str]
 
 
 class SceneMediaError(RuntimeError):
@@ -219,6 +227,8 @@ class AnimationPipeline(StandardPipeline):
 
         script = await self._call_script_llm(prompt)
         script = self._normalize_script(script, params["n_scenes"], params.get("mode", "generate"))
+        if params.get("proofread", True):
+            await self._proofread_narrations(script)
 
         ctx.extras["animation_script"] = script
         ctx.narrations = [scene.narration for scene in script.scenes]
@@ -246,6 +256,39 @@ class AnimationPipeline(StandardPipeline):
                 if attempt <= retries:
                     await asyncio.sleep(min(10.0, 2.0 * attempt))
         raise RuntimeError(f"Failed to generate animation script: {last_error}")
+
+    async def _proofread_narrations(self, script: AnimationScript):
+        """
+        Second LLM pass that fixes misspelled / merged character names and typos.
+
+        Guarded: a corrected line is accepted only if its length stays within 25% of
+        the original (no rewrites); any failure keeps the original narration.
+        """
+        if not script.scenes:
+            return
+        originals = [scene.narration for scene in script.scenes]
+        prompt = build_proofread_prompt(originals, [c.spoken_name() for c in script.characters])
+        try:
+            result = await self.llm(prompt=prompt, response_type=ProofreadResult, temperature=0.0, max_tokens=4000)
+        except Exception as e:
+            logger.warning(f"Narration proofread skipped: {e}")
+            return
+        narrations = getattr(result, "narrations", None)
+        if not isinstance(narrations, list) or len(narrations) != len(originals):
+            logger.warning("Narration proofread returned an unexpected result; keeping originals")
+            return
+        changed = 0
+        for scene, original, corrected in zip(script.scenes, originals, narrations):
+            corrected = (corrected or "").strip()
+            if not corrected or corrected == original:
+                continue
+            if abs(len(corrected) - len(original)) > max(4, 0.25 * len(original)):
+                logger.warning(f"Proofread change rejected (too different): {original!r} -> {corrected!r}")
+                continue
+            logger.info(f"Proofread: {original!r} -> {corrected!r}")
+            scene.narration = self._use_spoken_names(corrected, script.characters)
+            changed += 1
+        logger.info(f"✅ Narration proofread: {changed} line(s) corrected")
 
     @staticmethod
     def _is_retryable_llm_error(error: Exception) -> bool:
