@@ -328,17 +328,51 @@ class HTMLFrameGenerator:
             cls._playwright = None
             from playwright.async_api import async_playwright
             cls._playwright = await async_playwright().start()
-            cls._browser = await cls._playwright.chromium.launch(
-                args=[
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--disable-extensions',
-                ]
-            )
+            cls._browser = await cls._launch_chromium(cls._playwright)
             cls._browser_loop = current_loop
             logger.debug("Initialized Playwright Chromium browser")
         return cls._browser
+
+    @staticmethod
+    def _system_chromium_path() -> Optional[str]:
+        """
+        Chromium to use instead of Playwright's bundled browser.
+
+        PIXELLE_CHROMIUM_PATH wins; otherwise a system chromium/chrome on PATH.
+        Using the system browser avoids a ~400 MB download on small servers.
+        """
+        import shutil
+
+        explicit = os.environ.get("PIXELLE_CHROMIUM_PATH")
+        if explicit:
+            return explicit
+        for name in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable"):
+            path = shutil.which(name)
+            if path:
+                return path
+        return None
+
+    @classmethod
+    async def _launch_chromium(cls, playwright):
+        """Launch Playwright's Chromium, falling back to a system Chromium."""
+        args = [
+            '--no-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-extensions',
+        ]
+        explicit = os.environ.get("PIXELLE_CHROMIUM_PATH")
+        if explicit:
+            logger.info(f"Using Chromium from PIXELLE_CHROMIUM_PATH: {explicit}")
+            return await playwright.chromium.launch(executable_path=explicit, args=args)
+        try:
+            return await playwright.chromium.launch(args=args)
+        except Exception as e:
+            fallback = cls._system_chromium_path()
+            if not fallback or "executable doesn't exist" not in str(e).lower():
+                raise
+            logger.warning(f"Playwright browser not installed; using system Chromium at {fallback}")
+            return await playwright.chromium.launch(executable_path=fallback, args=args)
 
     @classmethod
     def _discard_browser_references(cls):

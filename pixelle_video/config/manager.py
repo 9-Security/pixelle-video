@@ -46,7 +46,8 @@ class ConfigManager:
     
     def _load(self) -> PixelleVideoConfig:
         """Load configuration from file"""
-        data = load_config_dict(str(self.config_path))
+        self._env_refs = {}
+        data = load_config_dict(str(self.config_path), refs=self._env_refs)
         config = PixelleVideoConfig(**data)
         
         # Validate template path exists
@@ -75,7 +76,7 @@ class ConfigManager:
     
     def save(self):
         """Save current configuration to file"""
-        save_config_dict(self.config.to_dict(), str(self.config_path))
+        save_config_dict(self.config.to_dict(), str(self.config_path), refs=getattr(self, "_env_refs", None))
     
     def update(self, updates: dict):
         """

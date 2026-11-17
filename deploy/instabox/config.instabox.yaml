@@ -1,0 +1,43 @@
+# Pixelle-Video configuration for an instabox machine.
+#
+# Secrets are NOT stored here. Values like ${NAME} are read from the environment:
+#   - secrets.env next to this file (chmod 600), loaded by the systemd units, or
+#   - instabox Org Secrets (placeholders in /run/instabox/env/env, swapped for the
+#     real value by the instabox outbound proxy).
+# Saving settings in the Web UI keeps these ${NAME} references intact.
+
+project_name: Pixelle-Video
+
+# LLM: freellmapi on the same machine (OpenAI-compatible, rotates free providers)
+llm:
+  api_key: ${FREELLMAPI_API_KEY}
+  base_url: http://127.0.0.1:3001/v1
+  model: ${PIXELLE_LLM_MODEL:-auto}
+
+api_providers:
+  common:
+    print_model_input: false
+    local_proxy: ""
+  cloudflare:
+    account_id: ${CLOUDFLARE_ACCOUNT_ID}
+    api_token: ${CLOUDFLARE_API_TOKEN}
+    base_url: https://api.cloudflare.com/client/v4
+    use_proxy: false
+
+comfyui:
+  comfyui_url: http://127.0.0.1:8188
+  runninghub_concurrent_limit: 1
+  tts:
+    inference_mode: local
+    local:
+      voice: zh-CN-XiaoxiaoNeural
+      speed: 1.1
+  image:
+    default_workflow: api/cloudflare/flux-1-schnell
+    prompt_prefix: ""
+  video:
+    default_workflow: null
+    prompt_prefix: ""
+
+template:
+  default_template: 1080x1920/video_fullscreen.html
