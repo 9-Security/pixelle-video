@@ -214,3 +214,27 @@ def test_render_clip(tmp_path, fail):
     assert (width, height, frames) == (W, H, 20)
     assert np.abs(_grab(str(out), 6) - _grab(str(out), 13)).mean() > 1.0  # it moves
     assert _grab(str(out), 0).mean() < _grab(str(out), 10).mean()        # fade-in
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+def test_render_single_pass_overlay_and_audio(tmp_path):
+    """One encode: frames fit into the overlay canvas, overlay on top, audio muxed."""
+    src = tmp_path / "scene.png"
+    _scene().save(src)
+    overlay = tmp_path / "overlay.png"
+    canvas = Image.new("RGBA", (W * 2, H * 3), (0, 0, 0, 0))
+    ImageDraw.Draw(canvas).rectangle((0, 0, W * 2, 20), fill=(255, 255, 0, 255))  # "subtitle bar"
+    canvas.save(overlay)
+    audio = tmp_path / "a.mp3"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=d=1", str(audio)], check=True)
+
+    out = tmp_path / "segment.mp4"
+    ParallaxRenderer(FakeSegmenter()).render(str(src), str(out), 1.0, W, H,
+                                             ParallaxOptions(fps=10), audio=str(audio), overlay=str(overlay))
+    probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height",
+                            "-of", "csv=p=0", str(out)], check=True, capture_output=True, text=True).stdout
+    assert f"video,{W * 2},{H * 3}" in probe and "audio" in probe
+    raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", "0.5", "-i", str(out), "-frames:v", "1",
+                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], check=True, capture_output=True).stdout
+    frame = np.frombuffer(raw, np.uint8).reshape(H * 3, W * 2, 3).astype(int)
+    assert frame[5, 10, 0] > 200 and frame[5, 10, 1] > 200 and frame[5, 10, 2] < 80   # overlay drawn

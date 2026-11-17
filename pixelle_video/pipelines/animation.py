@@ -66,6 +66,15 @@ MAX_SCENES = 30
 IMAGE_TEMPLATE_INTENSITY_FACTOR = 0.5
 
 
+def _flatten_exceptions(error: BaseException):
+    """Yield leaf exceptions of a (nested) exception group."""
+    if isinstance(error, BaseExceptionGroup):
+        for inner in error.exceptions:
+            yield from _flatten_exceptions(inner)
+    else:
+        yield error
+
+
 class ProofreadResult(BaseModel):
     """Structured output of the narration proofreading pass."""
 
@@ -150,7 +159,7 @@ class AnimationPipeline(StandardPipeline):
 
     def _validate_params(self, ctx: PipelineContext):
         params = ctx.params
-        if params.get("script") is not None:
+        if params.get("script") is not None and ctx.extras.get("animation_script") is None:
             ctx.extras["animation_script"] = load_animation_script(params["script"])
             if not isinstance(params["script"], (str, Path)):
                 params["script"] = "(inline script)"  # keep task metadata JSON-serializable
@@ -158,7 +167,7 @@ class AnimationPipeline(StandardPipeline):
                 params["script"] = str(params["script"])
             if not (ctx.input_text or "").strip():
                 ctx.input_text = ctx.extras["animation_script"].title or "animation"
-        elif not ctx.input_text or not ctx.input_text.strip():
+        elif ctx.extras.get("animation_script") is None and (not ctx.input_text or not ctx.input_text.strip()):
             raise ValueError("Animation pipeline requires a non-empty story idea or story text")
 
         mode = params.get("mode", "generate")
@@ -401,17 +410,79 @@ class AnimationPipeline(StandardPipeline):
     # ==================== Asset production ====================
 
     async def produce_assets(self, ctx: PipelineContext):
-        """Step 6: Produce audio + animated media per scene."""
+        """
+        Step 6: Produce audio + animated media per scene.
+
+        Network-bound work (narration TTS + image generation) for all scenes runs
+        concurrently first; CPU-bound rendering then runs one scene at a time.
+        """
         if ctx.params.get("motion_mode") == "ai_video":
             # AI video: standard frame processor already does TTS -> video -> overlay
             await super().produce_assets(ctx)
             return
-        await self._run_frames(ctx, self._process_camera_frame)
+        await self._prefetch_scene_assets(ctx)
+        await self._run_frames(ctx, self._render_scene, base=0.35, span=0.5)
+
+    async def _prefetch_scene_assets(self, ctx: PipelineContext):
+        """Generate narration audio and the scene image for every scene concurrently."""
+        frames = ctx.storyboard.frames
+        total = len(frames)
+        limit = max(1, int(ctx.params.get("prefetch_concurrency", 3)))
+        semaphore = asyncio.Semaphore(limit)
+        done = 0
+
+        async def fetch(frame: StoryboardFrame):
+            nonlocal done
+            async with semaphore:
+                await self.core.frame_processor._step_generate_audio(frame, ctx.config)
+                await self._generate_scene_image(ctx, frame)
+            done += 1
+            if ctx.progress_callback:
+                ctx.progress_callback(ProgressEvent(
+                    event_type="frame_step", progress=0.2 + 0.15 * done / total,
+                    frame_current=frame.index + 1, frame_total=total, step=2, action="media",
+                ))
+
+        logger.info(f"⏬ Prefetching narration + images for {total} scenes (concurrency {limit})")
+        try:
+            async with asyncio.TaskGroup() as group:
+                for frame in frames:
+                    group.create_task(fetch(frame))
+        except BaseExceptionGroup as group_error:
+            errors = list(_flatten_exceptions(group_error))
+            scene_errors = sorted((e for e in errors if isinstance(e, SceneMediaError)), key=lambda e: e.scene_index)
+            raise (scene_errors[0] if scene_errors else errors[0]) from None
+
+    async def _generate_scene_image(self, ctx: PipelineContext, frame: StoryboardFrame):
+        """Text-to-image for one scene; failures become SceneMediaError (scene + prompt)."""
+        config = ctx.config
+        try:
+            result = await self.core.media(
+                prompt=frame.image_prompt,
+                workflow=config.media_workflow,
+                media_type="image",
+                width=config.media_width,
+                height=config.media_height,
+                output_path=get_task_frame_path(config.task_id, frame.index, "image"),
+                index=frame.index + 1,
+            )
+        except Exception as e:
+            raise SceneMediaError(frame.index, frame.image_prompt, e, ctx.extras.get("script_path")) from e
+        if not result.is_image:
+            raise RuntimeError(
+                "Camera/parallax motion needs an image workflow, but the workflow returned "
+                f"'{result.media_type}'. Use motion_mode='ai_video' for video workflows."
+            )
+        frame.image_path = await self.core.frame_processor._download_media(
+            result.url, frame.index, config.task_id, media_type="image"
+        )
 
     async def _run_frames(
         self,
         ctx: PipelineContext,
         worker: Callable[[PipelineContext, StoryboardFrame, Callable], Awaitable[StoryboardFrame]],
+        base: float = 0.2,
+        span: float = 0.6,
     ):
         """Run a per-frame worker with the same concurrency policy as StandardPipeline."""
         storyboard = ctx.storyboard
@@ -428,7 +499,6 @@ class AnimationPipeline(StandardPipeline):
         concurrency = limit if is_runninghub else 1
         semaphore = asyncio.Semaphore(max(1, concurrency))
         completed = 0
-        base, span = 0.2, 0.6
         per_frame = span / total
 
         async def run(frame: StoryboardFrame):
@@ -455,10 +525,10 @@ class AnimationPipeline(StandardPipeline):
         storyboard.frames = sorted(results, key=lambda f: f.index)
         storyboard.total_duration = sum(f.duration for f in storyboard.frames)
 
-    async def _process_camera_frame(
+    async def _render_scene(
         self, ctx: PipelineContext, frame: StoryboardFrame, on_step: Callable
     ) -> StoryboardFrame:
-        """TTS -> text-to-image -> camera-motion clip -> subtitle overlay -> segment."""
+        """Animate a prefetched scene (audio + image ready) into its final segment."""
         processor = self.core.frame_processor
         config = ctx.config
         storyboard = ctx.storyboard
@@ -467,69 +537,53 @@ class AnimationPipeline(StandardPipeline):
         parallax = ctx.params.get("motion_mode") == "parallax"
         intensity = float(ctx.params.get("camera_intensity", 0.12 if parallax else 0.15))
         template_type = get_template_type(config.frame_template)
+        segment_path = get_task_frame_path(config.task_id, frame.index, "segment")
 
-        on_step(1, "audio", 0.0)
-        await processor._step_generate_audio(frame, config)
-
-        on_step(2, "media", 0.25)
-        try:
-            result = await self.core.media(
-                prompt=frame.image_prompt,
-                workflow=config.media_workflow,
-                media_type="image",
+        if template_type == "video" and parallax:
+            # Subtitle overlay first, then ONE encode: frames + overlay + narration
+            frame.media_type = "video"
+            frame.video_path = segment_path
+            on_step(3, "compose", 0.1)
+            await processor._step_compose_frame(frame, storyboard, config)
+            on_step(4, "video", 0.3)
+            options = ParallaxOptions(
+                motion=motion.value,
+                intensity=intensity,
+                parallax=max(0.0, min(1.5, float(ctx.params.get("parallax_strength", 0.6)))),
+                ambient=ctx.extras["ambient_effects"][frame.index],
+                breathing=bool(ctx.params.get("character_motion", True)),
+                fps=config.video_fps,
+                seed=frame.index + 1,
+            )
+            await asyncio.to_thread(
+                self._parallax_renderer().render,
+                frame.image_path,
+                segment_path,
+                frame.duration,
+                config.media_width,
+                config.media_height,
+                options,
+                frame.audio_path,
+                frame.composed_image_path,
+            )
+            frame.video_segment_path = segment_path
+        elif template_type == "video":
+            # Camera-only motion clip, then subtitle overlay + narration
+            clip_path = get_task_frame_path(config.task_id, frame.index, "video")
+            on_step(3, "video", 0.1)
+            await asyncio.to_thread(
+                video_service.create_motion_clip,
+                image=frame.image_path,
+                output=clip_path,
+                duration=frame.duration,
+                motion=motion.value,
+                intensity=intensity,
+                fps=config.video_fps,
                 width=config.media_width,
                 height=config.media_height,
-                output_path=get_task_frame_path(config.task_id, frame.index, "image"),
-                index=frame.index + 1,
             )
-        except Exception as e:
-            raise SceneMediaError(frame.index, frame.image_prompt, e, ctx.extras.get("script_path")) from e
-        if not result.is_image:
-            raise RuntimeError(
-                "Camera motion mode needs an image workflow, but the workflow returned "
-                f"'{result.media_type}'. Use motion_mode='ai_video' for video workflows."
-            )
-        frame.image_path = await processor._download_media(
-            result.url, frame.index, config.task_id, media_type="image"
-        )
-
-        if template_type == "video":
-            # Animate the raw image, then overlay the transparent subtitle template
-            clip_path = get_task_frame_path(config.task_id, frame.index, "video")
-            if parallax:
-                options = ParallaxOptions(
-                    motion=motion.value,
-                    intensity=intensity,
-                    parallax=max(0.0, min(1.5, float(ctx.params.get("parallax_strength", 0.6)))),
-                    ambient=ctx.extras["ambient_effects"][frame.index],
-                    breathing=bool(ctx.params.get("character_motion", True)),
-                    fps=config.video_fps,
-                    seed=frame.index + 1,
-                )
-                await asyncio.to_thread(
-                    self._parallax_renderer().render,
-                    frame.image_path,
-                    clip_path,
-                    frame.duration,
-                    config.media_width,
-                    config.media_height,
-                    options,
-                )
-            else:
-                await asyncio.to_thread(
-                    video_service.create_motion_clip,
-                    image=frame.image_path,
-                    output=clip_path,
-                    duration=frame.duration,
-                    motion=motion.value,
-                    intensity=intensity,
-                    fps=config.video_fps,
-                    width=config.media_width,
-                    height=config.media_height,
-                )
             frame.media_type = "video"
             frame.video_path = clip_path
-
             on_step(3, "compose", 0.5)
             await processor._step_compose_frame(frame, storyboard, config)
             on_step(4, "video", 0.75)
@@ -541,7 +595,6 @@ class AnimationPipeline(StandardPipeline):
             await processor._step_compose_frame(frame, storyboard, config)
 
             on_step(4, "video", 0.75)
-            segment_path = get_task_frame_path(config.task_id, frame.index, "segment")
             await asyncio.to_thread(
                 video_service.create_motion_clip,
                 image=frame.composed_image_path,

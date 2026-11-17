@@ -609,3 +609,43 @@ async def test_proofread_guards_keep_original(monkeypatch, reply):
     script = _cjk_script()
     await pipeline._proofread_narrations(script)
     assert script.scenes[0].narration == "夜深了，小福狸縮在樹洞裡發抖"
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+async def test_prefetch_runs_scenes_concurrently(monkeypatch, tmp_path):
+    import asyncio
+
+    from pixelle_video.models.media import MediaResult
+
+    active = {"now": 0, "max": 0}
+
+    async def slow_media(prompt, index=1, **kwargs):
+        active["now"] += 1
+        active["max"] = max(active["max"], active["now"])
+        await asyncio.sleep(0.2)
+        active["now"] -= 1
+        path = tmp_path / f"img_{index}.png"
+        _make_png(path, "green")
+        return MediaResult(media_type="image", url=f"file://{path}")
+
+    core = await _core_with_fakes(monkeypatch, tmp_path, slow_media)
+    pipeline = core.pipelines["animation"]
+    script = _script()
+    script.scenes = [script.scenes[0].model_copy() for _ in range(4)]
+
+    from pixelle_video.pipelines.linear import PipelineContext
+
+    ctx = PipelineContext(input_text="x", params={"script": script, "media_workflow": "api/cloudflare/x",
+                                                  "proofread": False})
+    pipeline._validate_params(ctx)
+    await pipeline.setup_environment(ctx)   # validates again: must be idempotent
+    await pipeline.generate_content(ctx)
+    await pipeline.determine_title(ctx)
+    await pipeline.plan_visuals(ctx)
+    await pipeline.initialize_storyboard(ctx)
+    try:
+        await pipeline._prefetch_scene_assets(ctx)
+        assert active["max"] == 3                        # bounded concurrency
+        assert all(f.image_path and f.audio_path for f in ctx.storyboard.frames)
+    finally:
+        shutil.rmtree(ctx.task_dir, ignore_errors=True)

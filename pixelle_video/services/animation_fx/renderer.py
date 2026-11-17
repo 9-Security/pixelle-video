@@ -24,6 +24,7 @@ ffmpeg subprocess, so memory stays flat regardless of clip length.
 """
 
 import math
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -43,6 +44,9 @@ from pixelle_video.services.animation_fx.segmentation import (
     SegmentationUnavailable,
 )
 from pixelle_video.utils.motion_util import clamp_intensity, even, frame_count
+
+# veryfast is ~3-4x faster than medium at a similar CRF (slightly larger files)
+X264_PRESET = os.environ.get("PIXELLE_X264_PRESET", "veryfast")
 
 
 @dataclass
@@ -190,10 +194,15 @@ class ParallaxRenderer:
     # ------------------------------------------------------------ output
 
     def render(self, image_path: str, output: str, duration: float, width: int, height: int,
-               options: Optional[ParallaxOptions] = None, audio: Optional[str] = None) -> str:
+               options: Optional[ParallaxOptions] = None, audio: Optional[str] = None,
+               overlay: Optional[str] = None) -> str:
         """
-        Render the clip to `output` (.mp4). With `audio`, it is muxed and the
-        clip length is `duration` (pass the audio duration).
+        Render the clip to `output` (.mp4).
+
+        Frames are composed at width x height. With `overlay` (a transparent PNG such
+        as a rendered subtitle template), the frames are fit into the overlay's canvas
+        (contain + pad), the overlay is drawn on top and `audio` is muxed, all in ONE
+        ffmpeg encode, which avoids separate overlay / audio re-encodes per scene.
         """
         if not shutil.which("ffmpeg"):
             raise RuntimeError("ffmpeg not found")
@@ -208,12 +217,24 @@ class ParallaxRenderer:
         n_frames = frame_count(duration, opts.fps)
 
         Path(output).parent.mkdir(parents=True, exist_ok=True)
-        cmd = ["ffmpeg", "-y", "-loglevel", "error",
-               "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(opts.fps), "-i", "-"]
+        inputs = ["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(opts.fps), "-i", "-"]
+        graph, video_map = [], "0:v"
+        if overlay:
+            with Image.open(overlay) as ov:
+                ow, oh = even(ov.size[0]), even(ov.size[1])
+            inputs += ["-i", overlay]
+            graph = ["-filter_complex",
+                     f"[0:v]scale={ow}:{oh}:force_original_aspect_ratio=decrease:flags=bicubic,"
+                     f"pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:color=black[bg];"
+                     f"[bg][1:v]overlay=0:0:format=auto,format=yuv420p[v]"]
+            video_map = "[v]"
+        maps = ["-map", video_map]
         if audio:
-            cmd += ["-i", audio, "-c:a", "aac", "-b:a", "192k"]
-        cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "20",
-                "-t", f"{duration:.3f}", output]
+            maps += ["-map", f"{inputs.count('-i')}:a", "-c:a", "aac", "-b:a", "192k"]
+            inputs += ["-i", audio]
+        cmd = (["ffmpeg", "-y", "-loglevel", "error"] + inputs + graph + maps
+               + ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", X264_PRESET, "-crf", "20",
+                  "-r", str(opts.fps), "-t", f"{duration:.3f}", output])
 
         logger.info(
             f"Parallax clip: {w}x{h}@{opts.fps} {duration:.2f}s motion={opts.motion} "
