@@ -80,7 +80,7 @@ async def generate_animation_sync(
         return AnimationGenerateResponse(**await _run(pixelle_video, body, request))
     except SceneMediaError as e:
         raise HTTPException(status_code=422, detail={
-            "message": str(e),
+            "message": e.public_message,
             "scene": e.scene_index + 1,
             "prompt": e.prompt,
             "safety_blocked": e.safety_blocked,

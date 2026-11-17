@@ -63,8 +63,9 @@ def restore_env_refs(data: Any, refs: EnvRefs, path: Tuple[str, ...] = ()) -> An
         ref = refs[path]
         match = ENV_REF_PATTERN.match(ref)
         current = os.environ.get(match.group(1), match.group(2) or "") if match else None
-        # Keep the reference unless the user changed the value in the UI
-        if data == current or data == "":
+        # Keep the reference only if the value is unchanged; an edit (including
+        # clearing the field) is an explicit user choice and is saved as-is
+        if data == current:
             return ref
     return data
 

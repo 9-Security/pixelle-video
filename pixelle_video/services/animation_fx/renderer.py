@@ -130,10 +130,28 @@ class ParallaxRenderer:
 
     # ------------------------------------------------------------ layers
 
-    def prepare(self, image_path: str, width: int, height: int) -> SceneLayers:
-        image = ImageOps.fit(Image.open(image_path).convert("RGB"), (width, height), Image.LANCZOS)
-        mask = None
-        if self.use_segmentation:
+    @staticmethod
+    def _load(image_path: str, width: int, height: int) -> Image.Image:
+        return ImageOps.fit(Image.open(image_path).convert("RGB"), (width, height), Image.LANCZOS)
+
+    def segment(self, image_path: str, width: int, height: int) -> Optional[np.ndarray]:
+        """Foreground mask at width x height, or None when segmentation is unavailable/disabled."""
+        if not self.use_segmentation:
+            return None
+        try:
+            return self.segmenter.predict(self._load(image_path, width, height))
+        except SegmentationUnavailable as e:
+            logger.warning(f"Segmentation unavailable, using single-layer motion: {e}")
+            return None
+
+    def prepare(self, image_path: str, width: int, height: int,
+                mask: Optional[np.ndarray] = None, segment: bool = True) -> SceneLayers:
+        """
+        Build layers. A precomputed `mask` is used as-is; otherwise the image is
+        segmented when `segment` is True (False = single layer, e.g. camera-only motion).
+        """
+        image = self._load(image_path, width, height)
+        if mask is None and segment and self.use_segmentation:
             try:
                 mask = self.segmenter.predict(image)
             except SegmentationUnavailable as e:
@@ -195,7 +213,8 @@ class ParallaxRenderer:
 
     def render(self, image_path: str, output: str, duration: float, width: int, height: int,
                options: Optional[ParallaxOptions] = None, audio: Optional[str] = None,
-               overlay: Optional[str] = None) -> str:
+               overlay: Optional[str] = None, mask: Optional[np.ndarray] = None,
+               segment: bool = True) -> str:
         """
         Render the clip to `output` (.mp4).
 
@@ -210,7 +229,7 @@ class ParallaxRenderer:
             raise ValueError("duration must be positive")
         opts = options or ParallaxOptions()
         w, h = even(width), even(height)
-        layers = self.prepare(image_path, w, h)
+        layers = self.prepare(image_path, w, h, mask=mask, segment=segment)
         camera = CameraPath(opts.motion, opts.intensity, w, h)
         particles = ParticleField(opts.ambient, w, h, seed=opts.seed)
         vignette = self._vignette(w, h, opts.vignette)
@@ -260,3 +279,9 @@ class ParallaxRenderer:
             raise RuntimeError(f"ffmpeg failed to encode parallax clip (exit {code}): {stderr[-500:]}")
         logger.success(f"Parallax clip created: {output}")
         return output
+
+
+def camera_only_options(motion: str, intensity: float, fps: int, seed: int = 0) -> ParallaxOptions:
+    """Plain zoom/pan (camera mode): no parallax, particles, breathing or vignette."""
+    return ParallaxOptions(motion=motion, intensity=intensity, parallax=0.0, ambient="none",
+                           breathing=False, vignette=0.0, fps=fps, seed=seed)

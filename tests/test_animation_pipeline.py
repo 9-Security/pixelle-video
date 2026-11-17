@@ -97,8 +97,8 @@ def test_script_prompt_modes():
 def test_scene_prompt_includes_style_and_character_anchor():
     script = _script()
     prompt = build_scene_image_prompt(script.scenes[1], script.characters, "STYLE")
-    # "owl" is also the character's name, so it becomes its name-free description
-    assert prompt.startswith("STYLE, the old grey owl with round glasses on a branch")
+    # lowercase "owl" is an ordinary word here, not the character named "Owl"
+    assert prompt.startswith("STYLE, owl on a branch")
     assert "Character: old grey owl with round glasses" in prompt
     assert "Unknown" not in prompt and "no letters" in prompt
     video_prompt = build_scene_video_prompt(script.scenes[0], script.characters, "STYLE")
@@ -538,7 +538,7 @@ def test_image_prompt_never_contains_names():
         AnimationCharacter(name="Fufu", display_name="福福", appearance="A small red fox with green eyes, teal scarf"),
         AnimationCharacter(name="Gugu", appearance="old grey owl, round glasses", descriptor="a wise grey owl"),
     ]
-    scene = AnimationScene(narration="n", visual="Fufu looks at Gugu's lantern; fufu smiles at 福福",
+    scene = AnimationScene(narration="n", visual="Fufu looks at Gugu's lantern; Fufu smiles at 福福",
                            motion="Fufu waves", characters=["Fufu", "Gugu"])
     prompt = build_scene_video_prompt(scene, chars, "STYLE")
     for name in ("Fufu", "fufu", "Gugu", "福福"):
@@ -662,3 +662,19 @@ async def test_proofread_times_out_without_blocking(monkeypatch):
     script = _cjk_script()
     await pipeline._proofread_narrations(script, timeout=0.1)
     assert script.scenes[0].narration == "夜深了，小福狸縮在樹洞裡發抖"   # unchanged, returned quickly
+
+
+
+def test_strip_names_common_word_names_and_no_rematch():
+    from pixelle_video.prompts.animation_script import _strip_names
+
+    chars = [
+        AnimationCharacter(name="Moon", appearance="white rabbit", descriptor="a white rabbit"),
+        AnimationCharacter(name="Fox", appearance="small red fox", descriptor="a small red fox"),
+    ]
+    out = _strip_names("Fox gazes at the full moon while Moon sleeps", chars)
+    assert out == "a small red fox gazes at the full moon while a white rabbit sleeps"
+    # a label containing another character's name (lowercase "fox") is not rewritten again
+    chars2 = [AnimationCharacter(name="Kit", appearance="x", descriptor="the fox cub"),
+              AnimationCharacter(name="fox", appearance="y", descriptor="an old wolf")]
+    assert _strip_names("Kit runs", chars2) == "the fox cub runs"

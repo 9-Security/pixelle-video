@@ -5,7 +5,7 @@
 # existing config.yaml or secrets.env and never deletes user data.
 #
 # Usage (from the project directory on the machine):
-#   bash deploy/instabox/install.sh [--no-services] [--prefetch-model]
+#   bash deploy/instabox/install.sh [--no-services] [--no-prefetch-model]
 #
 # Environment overrides:
 #   PIXELLE_MODEL_DIR   segmentation model cache (default /data/workspace/models/pixelle)
@@ -19,12 +19,13 @@ RUN_USER="$(id -un)"
 MODEL_DIR="${PIXELLE_MODEL_DIR:-/data/workspace/models/pixelle}"
 MIN_FREE_MB="${MIN_FREE_MB:-2500}"
 WITH_SERVICES=1
-PREFETCH_MODEL=0
+PREFETCH_MODEL=1
 
 for arg in "$@"; do
     case "$arg" in
         --no-services) WITH_SERVICES=0 ;;
-        --prefetch-model) PREFETCH_MODEL=1 ;;
+        --no-prefetch-model) PREFETCH_MODEL=0 ;;
+        --prefetch-model) PREFETCH_MODEL=1 ;;  # default; kept for compatibility
         *) echo "Unknown option: $arg" >&2; exit 2 ;;
     esac
 done

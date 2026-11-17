@@ -32,11 +32,14 @@ Workflow:
 
 import asyncio
 import json
+import os
 import re
+import threading
 from pathlib import Path
 from typing import Awaitable, Callable, List
 
 from loguru import logger
+from PIL import Image
 from pydantic import BaseModel
 
 from pixelle_video.models.animation import AnimationScene, AnimationScript, CameraMotion
@@ -53,7 +56,7 @@ from pixelle_video.prompts.animation_script import (
     get_style_prompt,
 )
 from pixelle_video.services.animation_fx import ParallaxOptions, ParallaxRenderer, normalize_effect
-from pixelle_video.services.video import VideoService
+from pixelle_video.services.animation_fx.renderer import camera_only_options
 from pixelle_video.utils.os_util import get_task_frame_path
 from pixelle_video.utils.template_util import get_template_type
 
@@ -91,19 +94,23 @@ class SceneMediaError(RuntimeError):
     """
 
     def __init__(self, scene_index: int, prompt: str, cause: Exception, script_path: str | None):
+        from pixelle_video.utils.content_policy import is_content_policy_rejection
+
         self.scene_index = scene_index
         self.prompt = prompt
         self.script_path = script_path
-        self.safety_blocked = "nsfw" in str(cause).lower()
+        self.safety_blocked = is_content_policy_rejection(cause)
         reason = (
             "rejected by the image model's safety filter (this can be a false positive)"
             if self.safety_blocked else f"failed: {cause}"
         )
-        hint = (
-            f" The script was saved to {script_path}; edit scene {scene_index + 1} "
-            f"(its 'visual' text or the character 'appearance') and regenerate with script=<that file>."
-            if script_path else ""
+        # Public message: no server paths (it is returned to API clients)
+        self.public_message = (
+            f"Scene {scene_index + 1} image generation {reason}. "
+            f"Edit scene {scene_index + 1} (its 'visual' text or the character 'appearance') "
+            f"in the saved animation script and regenerate with it."
         )
+        hint = f" The script was saved to {script_path}." if script_path else ""
         super().__init__(f"Scene {scene_index + 1} image generation {reason}. Prompt: {prompt[:400]!r}.{hint}")
 
 
@@ -150,6 +157,14 @@ class AnimationPipeline(StandardPipeline):
         frame_template: subtitle template; video_* recommended
         plus all TTS / BGM / output params of StandardPipeline
     """
+
+    def __init__(self, pixelle_video_core):
+        super().__init__(pixelle_video_core)
+        # Long-running services can load the segmentation model in the background at
+        # startup, so the first request does not pay the download / load cost.
+        if os.environ.get("PIXELLE_SEGMENTATION_WARMUP", "").lower() in ("1", "true", "yes"):
+            threading.Thread(target=self._parallax_renderer().segmenter.warmup,
+                             name="segmentation-warmup", daemon=True).start()
 
     # ==================== Validation & setup ====================
 
@@ -420,21 +435,40 @@ class AnimationPipeline(StandardPipeline):
         """
         Step 6: Produce audio + animated media per scene.
 
-        Network-bound work (narration TTS + image generation) for all scenes runs
-        concurrently first; CPU-bound rendering then runs one scene at a time.
+        Phase 1 (concurrent, bounded per backend): narration TTS, scene image,
+        subtitle overlay and foreground mask. Phase 2 (serial, CPU-bound): render
+        and encode each scene once.
         """
         if ctx.params.get("motion_mode") == "ai_video":
             # AI video: standard frame processor already does TTS -> video -> overlay
             await super().produce_assets(ctx)
             return
         await self._prefetch_scene_assets(ctx)
-        await self._run_frames(ctx, self._render_scene, base=0.35, span=0.5)
+        await self._run_frames(ctx, self._render_scene, base=0.45, span=0.4)
+
+    def _prefetch_limit(self, ctx: PipelineContext) -> int:
+        """
+        Concurrency for the prefetch phase, matching each backend's capacity:
+        RunningHub honours runninghub_concurrent_limit, self-hosted / default ComfyUI
+        workflows (and ComfyUI TTS) stay serial, direct API models use prefetch_concurrency.
+        """
+        from pixelle_video.config import config_manager
+
+        config = ctx.config
+        media = config.media_workflow or ""
+        uses_runninghub = media.startswith("runninghub/") or (config.tts_workflow or "").startswith("runninghub/")
+        if uses_runninghub:
+            return max(1, int(config_manager.config.comfyui.runninghub_concurrent_limit or 1))
+        if not media.startswith("api/") or config.tts_inference_mode == "comfyui":
+            return 1
+        return max(1, int(ctx.params.get("prefetch_concurrency", 3)))
 
     async def _prefetch_scene_assets(self, ctx: PipelineContext):
-        """Generate narration audio and the scene image for every scene concurrently."""
+        """Narration, image, subtitle overlay and foreground mask for every scene, concurrently."""
         frames = ctx.storyboard.frames
         total = len(frames)
-        limit = max(1, int(ctx.params.get("prefetch_concurrency", 3)))
+        ctx.extras.setdefault("masks", {})
+        limit = self._prefetch_limit(ctx)
         semaphore = asyncio.Semaphore(limit)
         done = 0
 
@@ -443,14 +477,20 @@ class AnimationPipeline(StandardPipeline):
             async with semaphore:
                 await self.core.frame_processor._step_generate_audio(frame, ctx.config)
                 await self._generate_scene_image(ctx, frame)
+            await self._prepare_scene_overlay(ctx, frame)
+            if ctx.params.get("motion_mode") == "parallax":
+                ctx.extras["masks"][frame.index] = await asyncio.to_thread(
+                    self._parallax_renderer().segment,
+                    frame.image_path, ctx.config.media_width, ctx.config.media_height,
+                )
             done += 1
             if ctx.progress_callback:
                 ctx.progress_callback(ProgressEvent(
-                    event_type="frame_step", progress=0.2 + 0.15 * done / total,
+                    event_type="frame_step", progress=0.2 + 0.25 * done / total,
                     frame_current=frame.index + 1, frame_total=total, step=2, action="media",
                 ))
 
-        logger.info(f"⏬ Prefetching narration + images for {total} scenes (concurrency {limit})")
+        logger.info(f"⏬ Prefetching narration, images and overlays for {total} scenes (concurrency {limit})")
         try:
             async with asyncio.TaskGroup() as group:
                 for frame in frames:
@@ -459,6 +499,16 @@ class AnimationPipeline(StandardPipeline):
             errors = list(_flatten_exceptions(group_error))
             scene_errors = sorted((e for e in errors if isinstance(e, SceneMediaError)), key=lambda e: e.scene_index)
             raise (scene_errors[0] if scene_errors else errors[0]) from None
+
+    async def _prepare_scene_overlay(self, ctx: PipelineContext, frame: StoryboardFrame):
+        """Render the subtitle template for a scene (transparent overlay or full image frame)."""
+        config = ctx.config
+        if get_template_type(config.frame_template) == "video":
+            frame.media_type = "video"
+            frame.video_path = get_task_frame_path(config.task_id, frame.index, "segment")
+        else:
+            frame.media_type = "image"
+        await self.core.frame_processor._step_compose_frame(frame, ctx.storyboard, config)
 
     async def _generate_scene_image(self, ctx: PipelineContext, frame: StoryboardFrame):
         """Text-to-image for one scene; failures become SceneMediaError (scene + prompt)."""
@@ -535,24 +585,20 @@ class AnimationPipeline(StandardPipeline):
     async def _render_scene(
         self, ctx: PipelineContext, frame: StoryboardFrame, on_step: Callable
     ) -> StoryboardFrame:
-        """Animate a prefetched scene (audio + image ready) into its final segment."""
-        processor = self.core.frame_processor
+        """
+        Render a prefetched scene into its final segment with ONE encode.
+
+        Parallax and camera modes share the same renderer (camera = no layers,
+        particles or breathing), so both get identical camera motion.
+        """
         config = ctx.config
-        storyboard = ctx.storyboard
-        video_service = VideoService()
         motion: CameraMotion = ctx.extras["camera_motions"][frame.index]
         parallax = ctx.params.get("motion_mode") == "parallax"
         intensity = float(ctx.params.get("camera_intensity", 0.12 if parallax else 0.15))
-        template_type = get_template_type(config.frame_template)
         segment_path = get_task_frame_path(config.task_id, frame.index, "segment")
+        renderer = self._parallax_renderer()
 
-        if template_type == "video" and parallax:
-            # Subtitle overlay first, then ONE encode: frames + overlay + narration
-            frame.media_type = "video"
-            frame.video_path = segment_path
-            on_step(3, "compose", 0.1)
-            await processor._step_compose_frame(frame, storyboard, config)
-            on_step(4, "video", 0.3)
+        if parallax:
             options = ParallaxOptions(
                 motion=motion.value,
                 intensity=intensity,
@@ -562,57 +608,30 @@ class AnimationPipeline(StandardPipeline):
                 fps=config.video_fps,
                 seed=frame.index + 1,
             )
-            await asyncio.to_thread(
-                self._parallax_renderer().render,
-                frame.image_path,
-                segment_path,
-                frame.duration,
-                config.media_width,
-                config.media_height,
-                options,
-                frame.audio_path,
-                frame.composed_image_path,
-            )
-            frame.video_segment_path = segment_path
-        elif template_type == "video":
-            # Camera-only motion clip, then subtitle overlay + narration
-            clip_path = get_task_frame_path(config.task_id, frame.index, "video")
-            on_step(3, "video", 0.1)
-            await asyncio.to_thread(
-                video_service.create_motion_clip,
-                image=frame.image_path,
-                output=clip_path,
-                duration=frame.duration,
-                motion=motion.value,
-                intensity=intensity,
-                fps=config.video_fps,
-                width=config.media_width,
-                height=config.media_height,
-            )
-            frame.media_type = "video"
-            frame.video_path = clip_path
-            on_step(3, "compose", 0.5)
-            await processor._step_compose_frame(frame, storyboard, config)
-            on_step(4, "video", 0.75)
-            await processor._step_create_video_segment(frame, config)
         else:
-            # Image template: compose first, then animate the composed frame gently
-            frame.media_type = "image"
-            on_step(3, "compose", 0.5)
-            await processor._step_compose_frame(frame, storyboard, config)
+            options = camera_only_options(motion.value, intensity, config.video_fps, frame.index + 1)
 
-            on_step(4, "video", 0.75)
+        on_step(4, "video", 0.2)
+        if get_template_type(config.frame_template) == "video":
+            # Animate the raw image under the transparent subtitle overlay
             await asyncio.to_thread(
-                video_service.create_motion_clip,
-                image=frame.composed_image_path,
-                output=segment_path,
-                audio=frame.audio_path,
-                motion=motion.value,
-                intensity=intensity * IMAGE_TEMPLATE_INTENSITY_FACTOR,
-                fps=config.video_fps,
+                renderer.render, frame.image_path, segment_path, frame.duration,
+                config.media_width, config.media_height, options,
+                frame.audio_path, frame.composed_image_path,
+                ctx.extras.get("masks", {}).get(frame.index), parallax,
             )
-            frame.video_segment_path = segment_path
-
+        else:
+            # Image template: subtitles are baked into the composed frame, move it gently
+            options.intensity = intensity * IMAGE_TEMPLATE_INTENSITY_FACTOR
+            with Image.open(frame.composed_image_path) as composed:
+                width, height = composed.size
+            await asyncio.to_thread(
+                renderer.render, frame.composed_image_path, segment_path, frame.duration,
+                width, height, options, frame.audio_path, None, None, False,
+            )
+        frame.video_segment_path = segment_path
+        if frame.media_type == "video":
+            frame.video_path = segment_path
         return frame
 
     # ==================== Persistence ====================

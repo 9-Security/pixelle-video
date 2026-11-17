@@ -16,12 +16,12 @@ such as freellmapi and llama-server.
 
 ```bash
 cd /data/workspace/pixelle-video
-bash deploy/instabox/install.sh --prefetch-model
+bash deploy/instabox/install.sh
 ```
 
 The script installs `ffmpeg` / `chromium` / CJK fonts only when missing, runs
 `uv sync --frozen --no-dev`, creates `config.yaml` and `secrets.env` (chmod 600)
-if absent, and installs:
+if absent, downloads the segmentation model (skip with `--no-prefetch-model`), and installs:
 
 - `pixelle-web.service`, `pixelle-api.service` (memory-capped, `Nice=5`)
 - `pixelle-cleanup.timer`: deletes `output/<task_id>` folders older than 14 days

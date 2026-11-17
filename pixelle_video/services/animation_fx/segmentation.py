@@ -117,16 +117,33 @@ def ensure_model(model: SegmentationModel = ISNET_ANIME, model_dir: Optional[Pat
 class ForegroundSegmenter:
     """Lazy, thread-safe ONNX segmenter returning a float mask in [0, 1]."""
 
-    _lock = threading.Lock()
+    _locks_guard = threading.Lock()
+    _locks: dict = {}
     _sessions: dict = {}
 
     def __init__(self, model: SegmentationModel = ISNET_ANIME, model_dir: Optional[Path] = None):
         self.model = model
         self.model_dir = model_dir
 
+    def _key_lock(self, key) -> threading.Lock:
+        with self._locks_guard:
+            return self._locks.setdefault(key, threading.Lock())
+
+    def warmup(self) -> bool:
+        """Download (if needed) and load the model now; returns False when unavailable."""
+        try:
+            self._session()
+            return True
+        except SegmentationUnavailable as e:
+            logger.warning(f"Segmentation warm-up failed: {e}")
+            return False
+
     def _session(self):
         key = (self.model.name, str(self.model_dir))
-        with self._lock:
+        if key in self._sessions:
+            return self._sessions[key]
+        # Per-model lock: a slow first download never blocks other models
+        with self._key_lock(key):
             if key not in self._sessions:
                 try:
                     import onnxruntime as ort

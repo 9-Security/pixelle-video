@@ -224,15 +224,24 @@ def _scene_characters(scene: AnimationScene, characters: Iterable[AnimationChara
 
 
 def _strip_names(text: str, characters: Iterable[AnimationCharacter]) -> str:
-    """Replace character names with name-free visual labels."""
-    for character in sorted(characters, key=lambda c: len(c.name), reverse=True):
-        for name in {character.name.strip(), character.spoken_name()}:
-            if not name:
-                continue
-            pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(name)}(?:'s)?(?![A-Za-z0-9])", re.IGNORECASE)
-            text = pattern.sub(lambda m: character.visual_label() + ("'s" if m.group(0).lower().endswith("'s") else ""),
-                               text)
-    return text
+    """
+    Replace character names with name-free visual labels in ONE pass.
+
+    - A single alternation (longest names first) means text inserted for one
+      character is never re-matched by another character's name.
+    - Names match case-sensitively: the script prompt requires the exact name in
+      English fields, so a character named "Moon" does not swallow "the full moon".
+    """
+    labels = {}
+    for character in characters:
+        for name in (character.name.strip(), character.spoken_name()):
+            if name and name not in labels:
+                labels[name] = character.visual_label()
+    if not labels:
+        return text
+    alternation = "|".join(re.escape(n) for n in sorted(labels, key=len, reverse=True))
+    pattern = re.compile(rf"(?<![A-Za-z0-9])({alternation})('s)?(?![A-Za-z0-9])")
+    return pattern.sub(lambda m: labels[m.group(1)] + (m.group(2) or ""), text)
 
 
 def _character_anchors(

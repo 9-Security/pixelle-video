@@ -16,6 +16,8 @@ Environment=PIXELLE_MODEL_DIR=__MODEL_DIR__
 Environment=PIXELLE_CHROMIUM_PATH=/usr/bin/chromium
 # Keep Playwright browsers off the shared instabox desktop
 Environment=INSTABOX_HEADLESS=1
+# Load the segmentation model in the background at startup (first request stays fast)
+Environment=PIXELLE_SEGMENTATION_WARMUP=1
 Environment=PYTHONUNBUFFERED=1
 ExecStart=__INSTALL_DIR__/.venv/bin/streamlit run web/app.py \
     --server.address 127.0.0.1 --server.port 8501 --server.headless true \

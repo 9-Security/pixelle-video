@@ -629,18 +629,9 @@ class APIProviderMediaService:
 
     def _is_content_inspection_error(self, exc: Exception) -> bool:
         """Return True when a provider rejects input because of content inspection."""
-        message = str(exc).lower()
-        return any(
-            marker in message
-            for marker in (
-                "datainspectionfailed",
-                "inappropriate content",
-                "green net check failed",
-                "content inspection",
-                "safety inspection",
-                "risk control",
-            )
-        )
+        from pixelle_video.utils.content_policy import CONTENT_INSPECTION_MARKERS, message_matches
+
+        return message_matches(str(exc), CONTENT_INSPECTION_MARKERS)
 
     async def _neutralize_video_prompt(self, prompt: str) -> str:
         """Use the configured LLM to rewrite a video prompt into a safer neutral prompt."""
