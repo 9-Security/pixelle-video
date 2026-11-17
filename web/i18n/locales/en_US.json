@@ -562,6 +562,13 @@
     "animation.ambient.bubbles": "Bubbles",
     "animation.parallax_strength": "Parallax strength",
     "animation.character_motion": "Character breathing motion",
-    "animation.parallax.model_hint": "First use downloads a ~176 MB segmentation model (isnet-anime), verified by SHA-256."
+    "animation.parallax.model_hint": "First use downloads a ~176 MB segmentation model (isnet-anime), verified by SHA-256.",
+    "animation.script_upload": "📝 Use an edited script (optional)",
+    "animation.script_upload.help": "Upload a previously generated animation_script.json (you may edit a scene's visual or a character's appearance). Its scenes are reused as-is and the LLM is not called again.",
+    "animation.script_upload.ok": "Loaded script \"{title}\" with {n} scenes",
+    "animation.script_upload.invalid": "Invalid script: {error}",
+    "animation.scene_blocked": "Scene {scene}'s prompt was rejected by the image model's safety filter (possibly a false positive). The prompt:",
+    "animation.scene_failed": "Scene {scene}'s image could not be generated. The prompt:",
+    "animation.scene_failed.fix": "The script was saved. Download it, edit that scene's visual or the character appearance, then upload it under \"Use an edited script\" and generate again. You can also pick another image model."
   }
 }

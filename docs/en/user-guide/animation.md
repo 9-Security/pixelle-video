@@ -73,6 +73,23 @@ or talk: that needs `motion_mode="ai_video"` with a video model.
 Rate limits (HTTP 429) and 5xx errors are retried with exponential backoff; 401/403 fail fast.
 Check Cloudflare's current free allowance before large batches.
 
+## When a scene is rejected by the image model
+
+Image models apply their own safety filters, which occasionally reject harmless prompts
+(for example Cloudflare FLUX on some "cute … anime" combinations). Pixelle does not try to
+work around these filters automatically. Instead:
+
+1. `animation_script.json` is saved **before** any image is generated.
+2. The run stops with a `SceneMediaError` naming the scene and the exact prompt
+   (Web UI: shown with a download button for the script; API: HTTP 422 with `scene`,
+   `prompt`, `safety_blocked` and `script_url`).
+3. Edit that scene's `visual` (or a character's `appearance`) and regenerate with the edited
+   script: Web UI "Use an edited script", API field `script`, or Python `script="path/to/animation_script.json"`.
+   The LLM is not called again, so the other scenes stay unchanged.
+
+You can also choose another image model; FLUX schnell remains the default because it keeps
+characters noticeably more consistent than SDXL Lightning in side-by-side tests.
+
 ## Web UI
 
 Open the **🎞️ Animation** tab, enter a story idea, choose an art style, an animation mode, an

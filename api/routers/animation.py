@@ -31,6 +31,7 @@ from api.schemas.animation import (
     AnimationGenerateResponse,
 )
 from api.tasks import TaskType, task_manager
+from pixelle_video.pipelines.animation import SceneMediaError
 from pixelle_video.prompts.animation_script import ANIMATION_STYLE_PRESETS
 
 router = APIRouter(prefix="/animation", tags=["Animation Generation"])
@@ -77,6 +78,14 @@ async def generate_animation_sync(
     try:
         logger.info(f"Sync animation generation: {body.text[:50]}...")
         return AnimationGenerateResponse(**await _run(pixelle_video, body, request))
+    except SceneMediaError as e:
+        raise HTTPException(status_code=422, detail={
+            "message": str(e),
+            "scene": e.scene_index + 1,
+            "prompt": e.prompt,
+            "safety_blocked": e.safety_blocked,
+            "script_url": path_to_url(request, e.script_path) if e.script_path else None,
+        })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

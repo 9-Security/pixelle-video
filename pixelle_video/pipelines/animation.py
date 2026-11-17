@@ -64,6 +64,54 @@ MAX_SCENES = 30
 IMAGE_TEMPLATE_INTENSITY_FACTOR = 0.5
 
 
+class SceneMediaError(RuntimeError):
+    """
+    A scene's image/video could not be generated.
+
+    Carries what a person needs to fix it: the scene number, the exact prompt,
+    whether the model's safety filter rejected it, and where the script was
+    saved so it can be edited and passed back with `script=...`.
+    """
+
+    def __init__(self, scene_index: int, prompt: str, cause: Exception, script_path: str | None):
+        self.scene_index = scene_index
+        self.prompt = prompt
+        self.script_path = script_path
+        self.safety_blocked = "nsfw" in str(cause).lower()
+        reason = (
+            "rejected by the image model's safety filter (this can be a false positive)"
+            if self.safety_blocked else f"failed: {cause}"
+        )
+        hint = (
+            f" The script was saved to {script_path}; edit scene {scene_index + 1} "
+            f"(its 'visual' text or the character 'appearance') and regenerate with script=<that file>."
+            if script_path else ""
+        )
+        super().__init__(f"Scene {scene_index + 1} image generation {reason}. Prompt: {prompt[:400]!r}.{hint}")
+
+
+def load_animation_script(source) -> AnimationScript:
+    """
+    Load a script from an AnimationScript, a dict, or a path to animation_script.json.
+
+    Accepts both the full saved payload ({"script": {...}, ...}) and a bare script.
+    """
+    if isinstance(source, AnimationScript):
+        return source.model_copy(deep=True)
+    if isinstance(source, (str, Path)):
+        path = Path(source)
+        if not path.is_file():
+            raise ValueError(f"Animation script file not found: {path}")
+        source = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(source, dict):
+        raise ValueError("script must be an AnimationScript, a dict or a path to animation_script.json")
+    data = source.get("script", source)
+    try:
+        return AnimationScript.model_validate(data)
+    except Exception as e:
+        raise ValueError(f"Invalid animation script: {e}") from e
+
+
 class AnimationPipeline(StandardPipeline):
     """
     Animated short generator.
@@ -94,7 +142,15 @@ class AnimationPipeline(StandardPipeline):
 
     def _validate_params(self, ctx: PipelineContext):
         params = ctx.params
-        if not ctx.input_text or not ctx.input_text.strip():
+        if params.get("script") is not None:
+            ctx.extras["animation_script"] = load_animation_script(params["script"])
+            if not isinstance(params["script"], (str, Path)):
+                params["script"] = "(inline script)"  # keep task metadata JSON-serializable
+            else:
+                params["script"] = str(params["script"])
+            if not (ctx.input_text or "").strip():
+                ctx.input_text = ctx.extras["animation_script"].title or "animation"
+        elif not ctx.input_text or not ctx.input_text.strip():
             raise ValueError("Animation pipeline requires a non-empty story idea or story text")
 
         mode = params.get("mode", "generate")
@@ -139,6 +195,16 @@ class AnimationPipeline(StandardPipeline):
     async def generate_content(self, ctx: PipelineContext):
         """Step 2: Generate the structured animation script."""
         params = ctx.params
+        if ctx.extras.get("animation_script") is not None:
+            # Edited / saved script: keep its scenes as-is, no LLM call
+            script = self._normalize_script(
+                ctx.extras["animation_script"], len(ctx.extras["animation_script"].scenes), "adapt"
+            )
+            ctx.extras["animation_script"] = script
+            ctx.narrations = [scene.narration for scene in script.scenes]
+            logger.info(f"✅ Using provided animation script: '{script.title}' ({len(script.scenes)} scenes)")
+            return
+
         self._report_progress(ctx.progress_callback, "generating_animation_script", 0.05)
 
         prompt = build_animation_script_prompt(
@@ -265,6 +331,8 @@ class AnimationPipeline(StandardPipeline):
         ]
         ctx.extras["camera_motions"] = [self._resolve_camera(ctx, scene) for scene in script.scenes]
         ctx.extras["ambient_effects"] = [self._resolve_ambient(ctx, scene) for scene in script.scenes]
+        # Save before any media is generated, so a failed run still leaves an editable script
+        self._save_animation_script(ctx)
         logger.info(f"✅ Built {len(ctx.image_prompts)} scene prompts (style: {style_prompt[:60]}...)")
 
     @staticmethod
@@ -361,15 +429,18 @@ class AnimationPipeline(StandardPipeline):
         await processor._step_generate_audio(frame, config)
 
         on_step(2, "media", 0.25)
-        result = await self.core.media(
-            prompt=frame.image_prompt,
-            workflow=config.media_workflow,
-            media_type="image",
-            width=config.media_width,
-            height=config.media_height,
-            output_path=get_task_frame_path(config.task_id, frame.index, "image"),
-            index=frame.index + 1,
-        )
+        try:
+            result = await self.core.media(
+                prompt=frame.image_prompt,
+                workflow=config.media_workflow,
+                media_type="image",
+                width=config.media_width,
+                height=config.media_height,
+                output_path=get_task_frame_path(config.task_id, frame.index, "image"),
+                index=frame.index + 1,
+            )
+        except Exception as e:
+            raise SceneMediaError(frame.index, frame.image_prompt, e, ctx.extras.get("script_path")) from e
         if not result.is_image:
             raise RuntimeError(
                 "Camera motion mode needs an image workflow, but the workflow returned "
@@ -447,6 +518,10 @@ class AnimationPipeline(StandardPipeline):
         """Persist standard metadata plus the structured animation script."""
         ctx.params["pipeline"] = "animation"
         await super()._persist_task_data(ctx)
+        self._save_animation_script(ctx)
+
+    def _save_animation_script(self, ctx: PipelineContext):
+        """Write animation_script.json (script, prompts, motions) into the task directory."""
         script: AnimationScript = ctx.extras.get("animation_script")
         if not script or not ctx.task_dir:
             return
@@ -461,6 +536,7 @@ class AnimationPipeline(StandardPipeline):
             }
             path = Path(ctx.task_dir) / "animation_script.json"
             path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            ctx.extras["script_path"] = str(path)
             logger.info(f"💾 Saved animation script: {path}")
         except Exception as e:
             logger.error(f"Failed to save animation script: {e}")

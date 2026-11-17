@@ -14,13 +14,18 @@
 
 from typing import Any, Dict, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AnimationGenerateRequest(BaseModel):
     """Request body for animation generation."""
 
-    text: str = Field(..., min_length=1, description="Story idea (generate) or full story (adapt)")
+    text: str = Field("", description="Story idea (generate) or full story (adapt); optional with `script`")
+    script: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Edited animation_script.json content (or its 'script' object). Skips script generation "
+                    "and reuses these scenes, e.g. after fixing a scene the image model rejected",
+    )
     mode: Literal["generate", "adapt"] = Field("generate", description="Script mode")
     title: Optional[str] = Field(None, description="Title; defaults to the AI-generated title")
     tone: Optional[str] = Field(None, description="Audience / tone hint")
@@ -59,6 +64,12 @@ class AnimationGenerateRequest(BaseModel):
 
     bgm_path: Optional[str] = None
     bgm_volume: float = Field(0.2, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def _text_or_script(self):
+        if not self.text.strip() and not self.script:
+            raise ValueError("Either 'text' or 'script' is required")
+        return self
 
     model_config = ConfigDict(json_schema_extra={
         "example": {

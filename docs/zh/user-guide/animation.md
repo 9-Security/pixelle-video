@@ -66,6 +66,19 @@
 
 遇到限流（HTTP 429）或 5xx 会指数退避重试；401/403 会直接报错。大批量生成前请先确认 Cloudflare 当前的免费额度。
 
+## 分镜被图像模型拒绝时
+
+图像模型有自己的安全过滤器，偶尔会误拒无害的提示词（例如 Cloudflare FLUX 对部分「cute … anime」组合）。
+Pixelle 不会自动绕过这些过滤器，而是：
+
+1. 在生成任何图片**之前**先保存 `animation_script.json`。
+2. 以 `SceneMediaError` 停止，并指出是哪个分镜、完整的提示词（Web 界面会显示并提供剧本下载；
+   API 返回 HTTP 422，包含 `scene`、`prompt`、`safety_blocked` 与 `script_url`）。
+3. 修改该分镜的 `visual`（或角色的 `appearance`）后，用编辑过的剧本重新生成：Web 界面「使用已编辑的剧本」、
+   API 字段 `script`，或 Python 参数 `script="path/to/animation_script.json"`。不会再调用 LLM，其他分镜保持不变。
+
+也可以改选其他图像模型；在并排对比中 FLUX schnell 的角色一致性明显优于 SDXL Lightning，因此仍为默认。
+
 ## Web 界面
 
 打开 **🎞️ 动画生成** 标签页，输入故事创意，选择画风、动画方式、图片（或视频）工作流与配音音色，点击 **生成动画**。生成完成后，视频下方会显示动画剧本（角色与分镜），并可下载 JSON。

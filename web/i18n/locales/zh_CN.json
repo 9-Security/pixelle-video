@@ -562,6 +562,13 @@
     "animation.ambient.bubbles": "泡泡",
     "animation.parallax_strength": "视差强度",
     "animation.character_motion": "角色呼吸动作",
-    "animation.parallax.model_hint": "首次使用会自动下载约 176 MB 的去背模型（isnet-anime），并以 SHA-256 校验。"
+    "animation.parallax.model_hint": "首次使用会自动下载约 176 MB 的去背模型（isnet-anime），并以 SHA-256 校验。",
+    "animation.script_upload": "📝 使用已编辑的剧本（可选）",
+    "animation.script_upload.help": "上传之前生成的 animation_script.json（可修改分镜的 visual 或角色 appearance），将直接沿用这些分镜，不再调用 LLM 重写剧本。",
+    "animation.script_upload.ok": "已载入剧本「{title}」，共 {n} 个分镜",
+    "animation.script_upload.invalid": "剧本格式不正确：{error}",
+    "animation.scene_blocked": "分镜 {scene} 的画面提示词被图像模型的安全过滤器拒绝（可能是误判）。以下为该提示词：",
+    "animation.scene_failed": "分镜 {scene} 的画面生成失败。以下为该提示词：",
+    "animation.scene_failed.fix": "剧本已保存。请下载后修改该分镜的 visual 或角色 appearance 描述，再从「使用已编辑的剧本」上传并重新生成；也可以改选其他图像模型。"
   }
 }

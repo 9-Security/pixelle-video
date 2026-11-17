@@ -127,6 +127,21 @@ class AnimationPipelineUI(PipelineUI):
                 max_characters = st.slider(tr("animation.max_characters"), 0, 6, 3,
                                            key=f"{KEY}max_characters")
 
+            script = None
+            with st.expander(tr("animation.script_upload"), expanded=False):
+                st.caption(tr("animation.script_upload.help"))
+                uploaded = st.file_uploader("animation_script.json", type=["json"], key=f"{KEY}script_file")
+                if uploaded is not None:
+                    try:
+                        from pixelle_video.pipelines.animation import load_animation_script
+
+                        script = json.loads(uploaded.getvalue().decode("utf-8"))
+                        loaded = load_animation_script(script)
+                        st.success(tr("animation.script_upload.ok", title=loaded.title, n=len(loaded.scenes)))
+                    except Exception as e:
+                        script = None
+                        st.error(tr("animation.script_upload.invalid", error=str(e)[:200]))
+
         with st.container(border=True):
             st.markdown(f"**{tr('animation.section.style')}**")
             style_keys = list(ANIMATION_STYLE_PRESETS.keys()) + ["custom"]
@@ -154,6 +169,7 @@ class AnimationPipelineUI(PipelineUI):
             "max_characters": max_characters,
             "art_style": DEFAULT_ANIMATION_STYLE if art_style == "custom" else art_style,
             "custom_style": custom_style,
+            "script": script,
         }
 
     # ---------------------------------------------------------------- middle
@@ -369,7 +385,7 @@ class AnimationPipelineUI(PipelineUI):
             except Exception as e:
                 progress_bar.empty()
                 status_text.text("")
-                st.error(tr("status.error", error=str(e)))
+                self._render_failure(e)
                 logger.exception(e)
                 return
 
@@ -388,10 +404,27 @@ class AnimationPipelineUI(PipelineUI):
             self._render_script(Path(result.video_path).parent / "animation_script.json")
 
     @staticmethod
+    def _render_failure(error: Exception):
+        """Explain a failed run; for a rejected scene, offer the saved script for editing."""
+        from pixelle_video.pipelines.animation import SceneMediaError
+
+        if not isinstance(error, SceneMediaError):
+            st.error(tr("status.error", error=str(error)))
+            return
+        key = "animation.scene_blocked" if error.safety_blocked else "animation.scene_failed"
+        st.error(tr(key, scene=error.scene_index + 1))
+        st.code(error.prompt, language=None)
+        if error.script_path and os.path.exists(error.script_path):
+            st.info(tr("animation.scene_failed.fix"))
+            with open(error.script_path, "rb") as f:
+                st.download_button("⬇️ animation_script.json", f.read(), file_name="animation_script.json",
+                                   mime="application/json", key=f"{KEY}failed_script")
+
+    @staticmethod
     def _validate(params: dict) -> Optional[str]:
         if not config_manager.validate():
             return tr("settings.not_configured")
-        if not (params.get("text") or "").strip():
+        if not (params.get("text") or "").strip() and not params.get("script"):
             return tr("error.input_required")
         if not params.get("media_workflow"):
             return tr("animation.workflow.none")

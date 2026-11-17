@@ -408,3 +408,117 @@ def test_fullscreen_templates(template, size):
     assert generator.get_media_size() == size
     params = generator.parse_template_parameters()
     assert {"title_size", "subtitle_size", "accent_color"} <= set(params)
+
+
+# ---------------------------------------------------------------- blocked scenes & edited scripts
+
+def test_load_animation_script_variants(tmp_path):
+    from pixelle_video.pipelines.animation import load_animation_script
+
+    bare = _script().model_dump()
+    assert load_animation_script(bare).title == "Little Fox"
+    saved = tmp_path / "animation_script.json"
+    saved.write_text(json.dumps({"script": bare, "scene_prompts": []}), encoding="utf-8")
+    assert load_animation_script(str(saved)).title == "Little Fox"
+    assert load_animation_script(_script()).title == "Little Fox"
+    with pytest.raises(ValueError, match="not found"):
+        load_animation_script(str(tmp_path / "missing.json"))
+    with pytest.raises(ValueError, match="Invalid animation script"):
+        load_animation_script({"scenes": "nope"})
+
+
+async def _core_with_fakes(monkeypatch, tmp_path, media):
+    from pixelle_video.service import PixelleVideoCore
+
+    core = PixelleVideoCore()
+    await core.initialize()
+
+    async def fake_tts(text, output_path=None, **kwargs):
+        _make_audio(Path(output_path), 0.6)
+        return output_path
+
+    monkeypatch.setattr(core, "media", media)
+    monkeypatch.setattr(core, "tts", fake_tts)
+    return core
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+async def test_blocked_scene_reports_prompt_and_saves_script(monkeypatch, tmp_path):
+    from pixelle_video.pipelines.animation import SceneMediaError
+
+    async def blocked_media(prompt, **kwargs):
+        raise RuntimeError("Cloudflare API error 400: AiError: Input prompt contains NSFW content.")
+
+    core = await _core_with_fakes(monkeypatch, tmp_path, blocked_media)
+    pipeline = core.pipelines["animation"]
+
+    async def fake_llm(prompt, response_type=None, **kwargs):
+        return _script()
+
+    monkeypatch.setattr(pipeline, "llm", fake_llm)
+    with pytest.raises(SceneMediaError) as exc:
+        await core.generate_video(text="a fox story", pipeline="animation", n_scenes=2,
+                                  media_workflow="api/cloudflare/flux-1-schnell")
+    err = exc.value
+    try:
+        assert err.scene_index == 0 and err.safety_blocked
+        assert "Momo (small orange fox with a blue scarf)" in err.prompt
+        assert "Scene 1" in str(err) and "safety filter" in str(err)
+        saved = json.loads(Path(err.script_path).read_text(encoding="utf-8"))
+        assert saved["script"]["title"] == "Little Fox" and len(saved["scene_prompts"]) == 2
+    finally:
+        shutil.rmtree(Path(err.script_path).parent, ignore_errors=True)
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+async def test_regenerate_from_edited_script_skips_llm(monkeypatch, tmp_path):
+    seen_prompts = []
+
+    async def ok_media(prompt, index=1, **kwargs):
+        seen_prompts.append(prompt)
+        path = tmp_path / f"img_{index}.png"
+        _make_png(path, "blue")
+        from pixelle_video.models.media import MediaResult
+
+        return MediaResult(media_type="image", url=f"file://{path}")
+
+    core = await _core_with_fakes(monkeypatch, tmp_path, ok_media)
+    pipeline = core.pipelines["animation"]
+
+    async def must_not_call_llm(*args, **kwargs):
+        raise AssertionError("LLM must not be called when a script is provided")
+
+    monkeypatch.setattr(pipeline, "llm", must_not_call_llm)
+    from pixelle_video.services.animation_fx import ParallaxRenderer
+
+    pipeline._renderer = ParallaxRenderer(use_segmentation=False)
+
+    edited = _script().model_dump()
+    edited["scenes"][0]["visual"] = "a fox on a grassy hill under the moon"   # the user's fix
+    saved = tmp_path / "animation_script.json"
+    saved.write_text(json.dumps({"script": edited}), encoding="utf-8")
+
+    try:
+        result = await core.generate_video(text="", pipeline="animation", script=str(saved),
+                                           media_workflow="api/cloudflare/flux-1-schnell")
+    except Exception as e:
+        if "playwright" in str(e).lower() or "executable" in str(e).lower():
+            pytest.skip(f"Playwright browser unavailable: {e}")
+        raise
+    try:
+        assert len(result.storyboard.frames) == 2          # empty scene dropped, order kept
+        assert "a fox on a grassy hill under the moon" in seen_prompts[0]
+        assert result.storyboard.title == "Little Fox"
+    finally:
+        shutil.rmtree(Path(result.video_path).parent, ignore_errors=True)
+
+
+def test_api_requires_text_or_script():
+    from fastapi.testclient import TestClient
+
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/api/animation/generate/sync", json={"media_workflow": "a"})
+    assert r.status_code == 422
+    assert "text" in r.text and "script" in r.text
