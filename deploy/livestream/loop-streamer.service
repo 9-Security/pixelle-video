@@ -1,0 +1,29 @@
+[Unit]
+Description=24/7 loop streamer (YouTube Live)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/loop-streamer/stream.env
+Environment=STREAM_STATE_DIR=/var/lib/loop-streamer
+ExecStart=/usr/bin/python3 /opt/loop-streamer/streamer.py
+Restart=always
+RestartSec=15
+# Runs as a throwaway unprivileged user; programs must be world-readable
+DynamicUser=yes
+StateDirectory=loop-streamer
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Copy-streaming needs very little: cap it so a bad file cannot hog the host
+CPUQuota=50%
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target
