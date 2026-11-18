@@ -42,6 +42,13 @@ grain (`--dither 1.5`) is added to every frame so smooth gradients do not band
 `--dither 0` gives 0.5-1.7 Mbit/s with visible banding in dark gradients, and
 `--size 1280x720` roughly halves bandwidth.
 
+On a host without the Python environment, build programs from the rendered
+clips (`output/loops/<scene>/clip.mp4`, `clip.wav`, `meta.json`) with ffmpeg only:
+
+```bash
+bash deploy/livestream/build_programs.sh output/loops /srv/loop-streamer/programs 30
+```
+
 ## 2. YouTube setup (once)
 
 1. YouTube Studio -> **Go live**. A channel's first live stream needs phone
