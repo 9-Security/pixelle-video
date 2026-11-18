@@ -164,3 +164,43 @@ def test_cli_list_render_and_program(tmp_path, capsys):
     assert cli_main(["program", "cup_on_edge", "--minutes", "0.2", *args]) == 0
     assert (tmp_path / "programs" / "cup_on_edge.mp4").exists()
     assert cli_main(["render", "cup_on_edge", "--size", "321x180", "--out", str(tmp_path)]) == 1
+
+
+def test_dither_is_static_small_and_optional():
+    scene = get_scene("rain_ripples")(320, 180, seed=2)
+    raw = scene.render(3.0)
+    framed = scene.frame(3.0)
+    diff = framed.astype(int) - raw.astype(int)
+    assert np.abs(diff).max() <= 3 and np.abs(diff).mean() > 0.3
+    assert np.array_equal(scene.frame(0.0), scene.frame(float(scene.period)))  # still periodic
+    scene.dither_strength = 0
+    scene._dither = scene._make_dither()
+    assert np.array_equal(scene.frame(3.0), raw)
+
+
+@needs_ffmpeg
+def test_render_clip_records_dither_and_rejects_negative(tmp_path):
+    settings = EncodeSettings(width=320, height=180, fps=10, preset="ultrafast")
+    meta = render_clip("cup_on_edge", str(tmp_path), settings, dither=0)
+    assert meta["dither"] == 0
+    with pytest.raises(ValueError):
+        render_clip("cup_on_edge", str(tmp_path), settings, dither=-1)
+
+
+def test_dominoes_never_overlap():
+    import cv2
+
+    from pixelle_video.loops.draw import rotated_rect
+
+    sc = get_scene("domino_forever")(640, 360)
+    for t in np.linspace(0, sc.period, 61):
+        p = t % sc.period
+        angles, nxt = {}, sc._angle(p - 31 * sc.step_seconds)
+        for k in range(30, -1, -1):
+            nxt = min(sc._angle(p - k * sc.step_seconds), float(np.interp(nxt, sc._next_grid, sc._limit)))
+            angles[k] = nxt
+        for k in range(30):
+            polys = [rotated_rect((j * sc.d, -sc.dh / 2), sc.dw, sc.dh, angles[j], (j * sc.d + sc.dw / 2, 0))
+                     .astype(np.float32) for j in (k, k + 1)]
+            area, _ = cv2.intersectConvexConvex(polys[0], polys[1])
+            assert area < 1.0

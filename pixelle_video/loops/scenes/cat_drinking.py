@@ -117,8 +117,13 @@ class CatDrinking(LoopScene):
             draw.polygon(img, [base + [-38 * s, 12 * s], tip, base + [38 * s, 12 * s]], fur)
             inner = base + (tip - base) * 0.55
             draw.polygon(img, [base + [-18 * s, 4 * s], inner, base + [18 * s, 4 * s]], draw.hex_bgr("#f2b8a2"))
-        for k in range(2):
-            draw.ellipse(img, hc + np.array([(-10 + k * 26) * s, -70 * s]), (6 * s, 20 * s), 0, fur_dark)
+        # Tabby "M" mark: three thin strokes fanning up from the brow (thin lines, so they never read as eyes)
+        stripe = draw.mix(fur, fur_dark, 0.7)
+        for dx, ang in ((-24, -16), (0, 0), (24, 16)):
+            a = np.radians(ang)
+            base = hc + np.array([dx * s, -58 * s])
+            tip = base + np.array([np.sin(a), -np.cos(a)]) * 26 * s
+            draw.line(img, base, tip, stripe, max(1, int(round(5 * s))))
         # Muzzle, closed eye, nose, whiskers
         muzzle = hc + np.array([60 * s, 40 * s])
         draw.ellipse(img, muzzle, (46 * s, 32 * s), 15, fur_light)

@@ -56,6 +56,8 @@ def main(argv=None) -> int:
         p.add_argument("--maxrate", default="3500k")
         p.add_argument("--preset", default="medium")
         p.add_argument("--seed", type=int, default=7)
+        p.add_argument("--dither", type=float, default=None,
+                       help="Grain strength against gradient banding (default 1.5; 0 = off, lower bitrate)")
         if name == "program":
             p.add_argument("--minutes", type=float, default=30.0, help="Approximate length of each program")
             p.add_argument("--rerender", action="store_true", help="Render clips even if they exist")
@@ -75,7 +77,7 @@ def main(argv=None) -> int:
         try:
             clip_meta = out / scene / "meta.json"
             if args.command == "render" or args.rerender or not clip_meta.exists():
-                render_clip(scene, str(out), settings, seed=args.seed)
+                render_clip(scene, str(out), settings, seed=args.seed, dither=args.dither)
             if args.command == "program":
                 build_program(str(out / scene), str(out / "programs" / f"{scene}.mp4"), args.minutes)
         except Exception as e:  # keep going with the other scenes

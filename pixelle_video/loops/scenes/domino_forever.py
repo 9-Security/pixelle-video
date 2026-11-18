@@ -38,8 +38,7 @@ class DominoForever(LoopScene):
         kind="suspense",
     )
 
-    step_seconds = 0.4  # time between two dominoes falling
-    fall_seconds = 1.6  # time for one domino to settle
+    step_seconds = 0.4  # time between two dominoes falling (= time from tip-over start to hitting the next)
 
     def setup(self) -> None:
         w, h, s = self.width, self.height, self.s
@@ -52,11 +51,16 @@ class DominoForever(LoopScene):
         self.ground = h * 0.78
         self.front_x = w * 0.62
         self.lie_angle = np.arccos(self.dw / self.d)  # resting angle on the next piece
-        self.contact_angle = np.arcsin(min(0.99, (self.d - self.dw) / self.dh))
-        # Fraction of the fall at which a piece hits the next one (for the clack timing)
-        xs = np.linspace(0, 1, 2001)
-        reached = np.nonzero(self.lie_angle * np.array([ease_in_out(x) for x in xs]) >= self.contact_angle)[0]
-        self.contact_time = float(xs[reached[0]] * self.fall_seconds) if len(reached) else self.fall_seconds * 0.5
+        # Max lean of a piece for each lean of the piece in front of it (keeps pieces from overlapping)
+        self._next_grid = np.linspace(0, np.pi / 2, 361)
+        self._limit = np.array([self._max_lean(a) for a in self._next_grid])
+        self.contact_angle = float(self._limit[0])
+        # Time the free fall so a piece hits the next one exactly when that one is due to start falling
+        xs = np.linspace(0, 1, 4001)
+        reached = np.nonzero(self.lie_angle * (0.5 - 0.5 * np.cos(np.pi * xs)) >= self.contact_angle)[0]
+        contact_fraction = float(xs[reached[0]]) if len(reached) else 0.33
+        self.fall_seconds = self.step_seconds / contact_fraction
+        self.contact_time = self.step_seconds
         sky = draw.vertical_gradient(w, h, draw.hex_bgr("#f7d9c4"), draw.hex_bgr("#fbeee0"))
         draw.glow(sky, (w * 0.25, h * 0.28), 150 * s, draw.hex_bgr("#ffc890"), 0.16)
         draw.circle(sky, (w * 0.25, h * 0.28), 70 * s, draw.hex_bgr("#fff1dc"))
@@ -78,6 +82,32 @@ class DominoForever(LoopScene):
             ys += amp * np.sin(2 * np.pi * n * (xs + shift) / length + ph)
         return [(0, self.height)] + list(zip(xs, ys)) + [(self.width, self.height)]
 
+    def _max_lean(self, next_angle: float) -> float:
+        """Largest lean of a piece whose top-right corner stays left of the next piece's left face."""
+        d, w, h = self.d, self.dw, self.dh
+        pivot = np.array([w / 2, 0.0])
+        npivot = np.array([d + w / 2, 0.0])
+        c, s_ = np.cos(next_angle), np.sin(next_angle)
+        bl = npivot + [-w * c, -w * s_]
+        tl = npivot + [-w * c + h * s_, -w * s_ - h * c]
+
+        def side(angle: float) -> float:
+            corner = pivot + [h * np.sin(angle), -h * np.cos(angle)]
+            e, r = tl - bl, corner - bl
+            return e[0] * r[1] - e[1] * r[0]
+
+        ref = np.sign(side(0.0))
+        lo, hi = 0.0, np.pi / 2
+        if np.sign(side(hi)) == ref:
+            return hi
+        for _ in range(40):
+            mid = (lo + hi) / 2
+            if np.sign(side(mid)) == ref:
+                lo = mid
+            else:
+                hi = mid
+        return lo
+
     def _angle(self, age: float) -> float:
         if age <= 0:
             return 0.0
@@ -95,10 +125,16 @@ class DominoForever(LoopScene):
         cam = self.v * p - self.front_x  # world x at screen left
         k0 = int(np.floor((cam - self.dh) / self.d))
         k1 = int(np.ceil((cam + self.width + self.dh) / self.d))
+        # Front to back: each piece may lean only as far as the piece in front of it allows
+        angles = {}
+        next_angle = self._angle(p - (k1 + 1) * self.step_seconds)
+        for k in range(k1, k0 - 1, -1):
+            free = self._angle(p - k * self.step_seconds)
+            next_angle = min(free, float(np.interp(next_angle, self._next_grid, self._limit)))
+            angles[k] = next_angle
         for k in range(k0, k1 + 1):
             x = k * self.d - cam
-            age = p - k * self.step_seconds
-            angle = self._angle(age)
+            angle = angles[k]
             pivot = (x + self.dw / 2, self.ground)
             center = (x, self.ground - self.dh / 2)
             corners = draw.rotated_rect(center, self.dw, self.dh, angle, pivot)

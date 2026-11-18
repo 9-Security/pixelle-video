@@ -24,6 +24,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Type
 
+import cv2
 import numpy as np
 
 from pixelle_video.loops.audio import SoundDesign
@@ -56,6 +57,31 @@ class LoopScene(ABC):
         self.ox = (self.width - 1920.0 * self.s) / 2
         self.oy = (self.height - 1080.0 * self.s) / 2
         self.setup()
+        self._dither = self._make_dither()
+
+    # Amplitude (in 8-bit levels) of the fixed grain added to every frame against gradient banding
+    dither_strength: float = 1.5
+
+    def _make_dither(self):
+        """Static triangular noise split into add/subtract planes (same pattern every frame, so it stays periodic)."""
+        if self.dither_strength <= 0:
+            return None
+        rng = np.random.default_rng(self.seed + 991)
+        noise = (rng.random((self.height, self.width, 1), np.float32)
+                 - rng.random((self.height, self.width, 1), np.float32)) * self.dither_strength * 2
+        noise = np.rint(noise).astype(np.int16)
+        noise = np.repeat(noise, 3, axis=2)  # same offset on all channels: grain, not colour speckle
+        return np.clip(noise, 0, 255).astype(np.uint8), np.clip(-noise, 0, 255).astype(np.uint8)
+
+    def frame(self, t: float) -> np.ndarray:
+        """The frame actually encoded: render(t) plus the static dither."""
+        img = self.render(t)
+        if self._dither is None:
+            return img
+        add, sub = self._dither
+        cv2.add(img, add, dst=img)
+        cv2.subtract(img, sub, dst=img)
+        return img
 
     def P(self, x: float, y: float) -> np.ndarray:
         """Map a point on the 1920x1080 design canvas to frame pixels (scaled and centred)."""

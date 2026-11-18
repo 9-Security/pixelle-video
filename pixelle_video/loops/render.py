@@ -83,25 +83,31 @@ def check_seam(scene: LoopScene, fps: int, samples: int = 6) -> SeamReport:
     """Compare the change across the loop point with ordinary frame-to-frame change."""
     dt = 1.0 / fps
     T = scene.period
-    first = scene.render(0.0)
-    seam = _diff(scene.render(T - dt), first)
-    wrap = _diff(scene.render(float(T)), first)
-    inner = [_diff(scene.render(t), scene.render(t + dt)) for t in np.linspace(T * 0.1, T * 0.9, samples)]
+    first = scene.frame(0.0)
+    seam = _diff(scene.frame(T - dt), first)
+    wrap = _diff(scene.frame(float(T)), first)
+    inner = [_diff(scene.frame(t), scene.frame(t + dt)) for t in np.linspace(T * 0.1, T * 0.9, samples)]
     typical = float(np.median(inner))
     # Steps right before and after the loop point: a fade or blink legitimately changes a lot there
-    before = _diff(scene.render(T - 2 * dt), scene.render(T - dt))
-    after = _diff(first, scene.render(dt))
+    before = _diff(scene.frame(T - 2 * dt), scene.frame(T - dt))
+    after = _diff(first, scene.frame(dt))
     ratio = seam / max(typical, before, after, 0.05)
     return SeamReport(seam, typical, wrap, ratio, ok=wrap < 0.5 and ratio <= SEAM_WARN_RATIO)
 
 
-def render_clip(scene_name: str, out_dir: str, settings: Optional[EncodeSettings] = None, seed: int = 7) -> dict:
+def render_clip(scene_name: str, out_dir: str, settings: Optional[EncodeSettings] = None, seed: int = 7,
+                dither: Optional[float] = None) -> dict:
     """Render one period of a scene; returns the meta dict (also written to meta.json)."""
     settings = settings or EncodeSettings()
     settings.validate()
     ffmpeg = _require_ffmpeg()
     scene_cls = get_scene(scene_name)
     scene = scene_cls(settings.width, settings.height, seed=seed)
+    if dither is not None:  # grain against banding; 0 disables it (lower bitrate, more visible banding)
+        if dither < 0:
+            raise ValueError("dither must be >= 0")
+        scene.dither_strength = float(dither)
+        scene._dither = scene._make_dither()
     T = scene.period
     if T % GOP_SECONDS:
         raise ValueError(f"Scene period {T}s must be a multiple of {GOP_SECONDS}s (keyframe at the loop point)")
@@ -137,7 +143,7 @@ def render_clip(scene_name: str, out_dir: str, settings: Optional[EncodeSettings
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         for i in range(n_frames):
-            frame = scene.render(i / settings.fps)
+            frame = scene.frame(i / settings.fps)
             proc.stdin.write(np.ascontiguousarray(frame).tobytes())
             if i and i % (settings.fps * 10) == 0:
                 logger.info(f"{scene_name}: {i}/{n_frames} frames")
@@ -159,6 +165,7 @@ def render_clip(scene_name: str, out_dir: str, settings: Optional[EncodeSettings
         "kind": scene.info.kind,
         "period": T,
         "seed": seed,
+        "dither": scene.dither_strength,
         "settings": asdict(settings),
         "seam": asdict(seam),
         "clip": clip_path.name,

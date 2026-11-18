@@ -36,9 +36,11 @@ frequency-domain noise that is exactly periodic plus synthesised events wrapped
 around the period.
 
 Defaults: 1920x1080, 30 fps, H.264 CRF 23 capped at 3.5 Mbit/s, keyframe every
-2 s (YouTube requires 4 s or less), AAC 128 kbit/s 48 kHz. Measured bitrates are
-0.5-1.7 Mbit/s because the scenes are simple. Use `--size 1280x720` to halve
-bandwidth again.
+2 s (YouTube requires 4 s or less), AAC 128 kbit/s 48 kHz. A fixed, very light
+grain (`--dither 1.5`) is added to every frame so smooth gradients do not band
+(before and after YouTube's own re-encode). Measured bitrates are 1.5-2.8 Mbit/s;
+`--dither 0` gives 0.5-1.7 Mbit/s with visible banding in dark gradients, and
+`--size 1280x720` roughly halves bandwidth.
 
 ## 2. YouTube setup (once)
 
@@ -83,8 +85,9 @@ Behaviour:
 
 ## 4. Choosing a host
 
-Bandwidth: at ~1 Mbit/s a stream sends about 0.45 GB per hour, roughly
-330 GB per month (1080p at the 3.5 Mbit/s cap: up to ~1.2 TB/month).
+Bandwidth: at ~2 Mbit/s (the 1080p defaults) a stream sends about 0.9 GB per
+hour, roughly 650 GB per month; 720p or `--dither 0` brings it to ~300-350 GB
+(the 3.5 Mbit/s cap bounds it at ~1.2 TB/month).
 
 | Host | Fits 24/7? | Notes |
 |---|---|---|
