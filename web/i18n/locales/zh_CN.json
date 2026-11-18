@@ -570,6 +570,6 @@
     "animation.scene_blocked": "分镜 {scene} 的画面提示词被图像模型的安全过滤器拒绝（可能是误判）。以下为该提示词：",
     "animation.scene_failed": "分镜 {scene} 的画面生成失败。以下为该提示词：",
     "animation.scene_failed.fix": "剧本已保存。请下载后修改该分镜的 visual 或角色 appearance 描述，再从「使用已编辑的剧本」上传并重新生成；也可以改选其他图像模型。",
-    "animation.quota_exhausted": "图像服务的每日免费额度已用完（分镜 {scene} 起停止），额度于 UTC 00:00 重置。可在重置后用已保存的剧本重新生成，或改选其他图像模型。"
+    "animation.quota_exhausted": "图像服务的每日免费额度已用完（分镜 {scene} 起停止），额度每日重置。可在重置后用已保存的剧本重新生成，或改选其他图像模型。"
   }
 }

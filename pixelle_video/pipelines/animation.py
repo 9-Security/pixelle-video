@@ -113,7 +113,7 @@ class SceneMediaError(RuntimeError):
         self.safety_blocked = is_content_policy_rejection(cause)
         self.quota_exhausted = _is_quota_exhausted(cause)
         if self.quota_exhausted:
-            reason = "stopped: the image provider's daily free allowance is used up (resets at 00:00 UTC)"
+            reason = "stopped: the image provider's daily free allowance is used up (it resets daily)"
         elif self.safety_blocked:
             reason = "rejected by the image model's safety filter (this can be a false positive)"
         else:

@@ -253,7 +253,7 @@ class CloudflareImageClient:
                     detail = response.text[:300]
                     if is_daily_quota_error(response.status_code, response.text):
                         raise CloudflareQuotaExceeded(
-                            "Cloudflare Workers AI daily free allocation is used up; it resets at 00:00 UTC. "
+                            "Cloudflare Workers AI daily free allocation is used up; it resets daily (exact reset time is set by Cloudflare). "
                             f"Detail: {detail}"
                         )
                     if response.status_code in (401, 403):

@@ -53,7 +53,7 @@ with `--private --rotate-token` if it leaks.
 
 ## Cloudflare quota
 
-The free plan allows roughly 130 FLUX images (~26 five-scene videos) per UTC day (estimate).
+The free plan allows roughly 130 FLUX images (~26 five-scene videos) per day (estimate; Cloudflare sets the reset time).
 Check today's estimated usage with `cat ~/.cache/pixelle-video/usage/cloudflare.json`.
 
 ## Operate

@@ -75,7 +75,7 @@ Check Cloudflare's current free allowance before large batches.
 
 ## Cloudflare free daily allowance
 
-Workers AI's free plan has a daily allowance (10,000 neurons, reset at 00:00 UTC).
+Workers AI's free plan has a daily allowance (10,000 neurons per day; Cloudflare sets the reset time).
 Pixelle keeps an **estimated** per-day counter in `~/.cache/pixelle-video/usage/cloudflare.json`
 (`PIXELLE_USAGE_DIR` to relocate) and logs it after every image, warning above 80%.
 The estimate (~77 neurons per 1024x1024 FLUX schnell image, i.e. roughly 130 images or ~26

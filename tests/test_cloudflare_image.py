@@ -188,7 +188,7 @@ async def test_daily_quota_fails_fast_without_retries(monkeypatch, tmp_path):
                                                                 "allocation of 10,000 neurons, please upgrade"}]})
 
     _patch_transport(monkeypatch, handler)
-    with pytest.raises(CloudflareQuotaExceeded, match="resets at 00:00 UTC"):
+    with pytest.raises(CloudflareQuotaExceeded, match="resets daily"):
         await CloudflareImageClient("acc", "tok").generate_image("a fox", str(tmp_path / "o.png"))
     assert calls["n"] == 1
 

@@ -68,7 +68,7 @@
 
 ## Cloudflare 每日免费额度
 
-Workers AI 免费方案每日有额度（10,000 neurons，UTC 00:00 重置）。Pixelle 会在
+Workers AI 免费方案每日有额度（每日 10,000 neurons，重置时间以 Cloudflare 为准）。Pixelle 会在
 `~/.cache/pixelle-video/usage/cloudflare.json`（可用 `PIXELLE_USAGE_DIR` 改位置）记录**估算**的每日用量，
 每张图后写入日志，超过 80% 会警告。估算值（FLUX schnell 1024x1024 每张约 77 neurons，约每日 130 张、
 26 支 5 分镜视频）仅供参考，可用 `CLOUDFLARE_NEURONS_PER_TILE`、`CLOUDFLARE_NEURONS_PER_STEP`、

@@ -268,4 +268,4 @@ def test_scene_error_reports_quota_exhaustion():
     except RuntimeError as outer:
         err = SceneMediaError(0, "p", outer, None)
     assert err.quota_exhausted and not err.safety_blocked
-    assert "00:00 UTC" in err.public_message and "Edit scene" not in err.public_message
+    assert "resets daily" in err.public_message and "Edit scene" not in err.public_message
