@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Pixelle-Video output retention cleanup
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

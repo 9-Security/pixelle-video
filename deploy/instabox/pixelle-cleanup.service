@@ -1,0 +1,13 @@
+# Deletes Pixelle output task folders older than RETENTION_DAYS (default 14)
+# so generated videos do not fill the 20 GiB /data disk. Only touches
+# __INSTALL_DIR__/output/<task_id> directories. Triggered by pixelle-cleanup.timer.
+[Unit]
+Description=Pixelle-Video output retention cleanup
+
+[Service]
+Type=oneshot
+User=__USER__
+Environment=RETENTION_DAYS=14
+ExecStart=/usr/bin/find __INSTALL_DIR__/output -mindepth 1 -maxdepth 1 -type d \
+    -regextype posix-extended -regex '.*/[0-9]{8}_[0-9]{6}_[0-9a-f]{4}' \
+    -mtime +${RETENTION_DAYS} -print -exec rm -rf {} +

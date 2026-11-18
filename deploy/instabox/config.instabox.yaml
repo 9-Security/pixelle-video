@@ -1,0 +1,56 @@
+# Pixelle-Video configuration for an instabox machine.
+#
+# Secrets are NOT stored here. Values like ${NAME} are read from the environment:
+#   - secrets.env next to this file (chmod 600), loaded by the systemd units, or
+#   - instabox Org Secrets (placeholders in /run/instabox/env/env, swapped for the
+#     real value by the instabox outbound proxy).
+# Saving settings in the Web UI keeps these ${NAME} references intact.
+
+project_name: Pixelle-Video
+
+# LLM (any OpenAI-compatible endpoint). Default: Google Gemini free tier.
+# To use freellmapi on this machine instead, set in secrets.env:
+#   PIXELLE_LLM_BASE_URL=http://127.0.0.1:3001/v1
+#   PIXELLE_LLM_MODEL=auto
+#   PIXELLE_LLM_API_KEY=<freellmapi unified key>
+llm:
+  api_key: ${PIXELLE_LLM_API_KEY}
+  base_url: ${PIXELLE_LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
+  model: ${PIXELLE_LLM_MODEL:-gemini-flash-latest}
+
+api_providers:
+  common:
+    print_model_input: false
+    local_proxy: ""
+  # Local stable-diffusion.cpp: used automatically when Cloudflare's daily allowance runs out
+  # (~1 min per image on 4 vCPUs). Set sd_dir to "" to disable the fallback.
+  local_sd:
+    sd_dir: ${PIXELLE_LOCAL_SD_DIR:-/data/workspace/sd}
+    binary: sd-cli
+    taesd: taesd_full.safetensors
+    threads: 4
+    long_side: 896
+    timeout: 600
+  cloudflare:
+    account_id: ${CLOUDFLARE_ACCOUNT_ID}
+    api_token: ${CLOUDFLARE_API_TOKEN}
+    base_url: https://api.cloudflare.com/client/v4
+    use_proxy: false
+
+comfyui:
+  comfyui_url: http://127.0.0.1:8188
+  runninghub_concurrent_limit: 1
+  tts:
+    inference_mode: local
+    local:
+      voice: zh-CN-XiaoxiaoNeural
+      speed: 1.1
+  image:
+    default_workflow: api/cloudflare/flux-1-schnell
+    prompt_prefix: ""
+  video:
+    default_workflow: null
+    prompt_prefix: ""
+
+template:
+  default_template: 1080x1920/video_fullscreen.html

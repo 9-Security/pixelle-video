@@ -25,6 +25,7 @@ from web.pipelines.base import (
 
 # Import all pipeline UI modules to ensure they register themselves
 from web.pipelines import standard
+from web.pipelines import animation
 from web.pipelines import asset_based
 from web.pipelines import digital_human
 from web.pipelines import i2v

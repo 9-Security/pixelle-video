@@ -674,6 +674,111 @@ class VideoService:
             logger.error(f"FFmpeg error creating video from image: {error_msg}")
             raise RuntimeError(f"Failed to create video from image: {error_msg}")
     
+    def create_motion_clip(
+        self,
+        image: str,
+        output: str,
+        duration: Optional[float] = None,
+        audio: Optional[str] = None,
+        motion: str = "zoom_in",
+        intensity: float = 0.15,
+        fps: int = 30,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+    ) -> str:
+        """
+        Animate a still image with a camera move (Ken Burns effect).
+
+        Args:
+            image: Source image path
+            output: Output video path (.mp4)
+            duration: Clip duration in seconds (required when `audio` is None)
+            audio: Optional audio to mux; clip duration then matches the audio
+            motion: static / zoom_in / zoom_out / pan_left / pan_right / pan_up / pan_down
+            intensity: Zoom/pan amount, clamped to 0.0-0.5 (0.15 = 15% zoom)
+            fps: Output frame rate
+            width: Output width (default: source image width)
+            height: Output height (default: source image height)
+
+        Returns:
+            Path to the output video
+
+        Raises:
+            ValueError: If neither duration nor audio is given
+            RuntimeError: If FFmpeg execution fails
+        """
+        from pixelle_video.utils.motion_util import (
+            build_zoompan_expressions,
+            even,
+            frame_count,
+            supersample_size,
+        )
+
+        self._ensure_ffmpeg()
+
+        if audio:
+            duration = self._get_audio_duration(audio)
+        if not duration or duration <= 0:
+            raise ValueError("create_motion_clip requires a positive duration or an audio file")
+
+        try:
+            if not width or not height:
+                probe = ffmpeg.probe(image)
+                stream = next(s for s in probe["streams"] if s.get("codec_type") == "video")
+                width = width or int(stream["width"])
+                height = height or int(stream["height"])
+            out_w, out_h = even(width), even(height)
+            ss_w, ss_h = supersample_size(out_w, out_h)
+            n_frames = frame_count(duration, fps)
+            expr = build_zoompan_expressions(motion, n_frames, intensity)
+
+            logger.info(
+                f"Creating motion clip: motion={motion}, intensity={intensity}, "
+                f"{out_w}x{out_h}@{fps}fps, {duration:.2f}s ({n_frames} frames)"
+            )
+
+            video = (
+                ffmpeg.input(image)
+                .filter("scale", ss_w, ss_h, force_original_aspect_ratio="increase")
+                .filter("crop", ss_w, ss_h)
+                .filter(
+                    "zoompan",
+                    z=expr["z"],
+                    x=expr["x"],
+                    y=expr["y"],
+                    d=n_frames,
+                    s=f"{out_w}x{out_h}",
+                    fps=fps,
+                )
+                .filter("format", "yuv420p")
+            )
+
+            output_kwargs = dict(
+                t=duration,
+                vcodec="libx264",
+                pix_fmt="yuv420p",
+                preset="medium",
+                crf=20,
+                r=fps,
+            )
+            if audio:
+                stream_out = ffmpeg.output(
+                    video, ffmpeg.input(audio), output,
+                    acodec="aac", audio_bitrate="192k", **output_kwargs
+                )
+            else:
+                stream_out = ffmpeg.output(video, output, an=None, **output_kwargs)
+
+            Path(output).parent.mkdir(parents=True, exist_ok=True)
+            stream_out.overwrite_output().run(capture_stdout=True, capture_stderr=True)
+
+            logger.success(f"Motion clip created: {output}")
+            return output
+        except ffmpeg.Error as e:
+            error_msg = e.stderr.decode() if e.stderr else str(e)
+            logger.error(f"FFmpeg error creating motion clip: {error_msg}")
+            raise RuntimeError(f"Failed to create motion clip: {error_msg}")
+
     def add_bgm(
         self,
         video: str,

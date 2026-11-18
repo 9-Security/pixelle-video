@@ -62,6 +62,9 @@ class PipelineContext:
     final_video_path: Optional[str] = None
     result: Optional[VideoGenerationResult] = None
 
+    # === Pipeline-specific state (e.g. structured scripts) ===
+    extras: Dict[str, Any] = field(default_factory=dict)
+
 
 class LinearVideoPipeline(BasePipeline):
     """

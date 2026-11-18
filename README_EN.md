@@ -32,6 +32,7 @@ Just input a **topic**, and Pixelle-Video will automatically:
 
 ## 📋 Recent Updates
 
+- ✅ **2026-11-17**: Added the **Animation** module: enter a story idea and AI writes the script and character sheet, generates style-consistent scenes, and renders a narrated animated short using camera-motion or AI video (Web UI + `/api/animation` endpoints)
 - ✅ **2026-06-01**: Added direct API media model configuration in WebUI, including image/video provider credentials, Base URLs, and per-provider proxy toggles
 - ✅ **2026-01-26**: Added the Motion Transfer pipeline — upload a reference video and an image to transfer motion.
 - ✅ **2026-01-14**: Added "Digital Human" and "Image-to-Video" pipelines, multi-language TTS voices support

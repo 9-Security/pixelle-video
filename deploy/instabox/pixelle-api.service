@@ -1,0 +1,30 @@
+# Pixelle-Video REST API (no authentication: bound to localhost only, for
+# local callers such as webui_bridge.py). Installed by install.sh.
+[Unit]
+Description=Pixelle-Video API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__INSTALL_DIR__
+EnvironmentFile=-/run/instabox/env/env
+EnvironmentFile=-__INSTALL_DIR__/secrets.env
+Environment=PIXELLE_MODEL_DIR=__MODEL_DIR__
+Environment=PIXELLE_CHROMIUM_PATH=/usr/bin/chromium
+Environment=INSTABOX_HEADLESS=1
+# Load the segmentation model in the background at startup (first request stays fast)
+Environment=PIXELLE_SEGMENTATION_WARMUP=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__INSTALL_DIR__/.venv/bin/python api/app.py --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+MemoryHigh=2500M
+MemoryMax=3500M
+Nice=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
