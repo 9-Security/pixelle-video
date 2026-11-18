@@ -147,8 +147,10 @@ def result_markdown(result: dict, elapsed: int) -> str:
     output_id = result.get("output_id", "")
     video = f"{ROUTE}{output_id}/final.mp4"
     script = f"{ROUTE}{output_id}/animation_script.json"
+    note = ("\n\nℹ️ 雲端產圖額度已用完，部分分鏡改用本機模型產生（較慢、畫風可能略有差異）。"
+            if result.get("image_fallback_used") else "")
     return (
-        f"\n\n✅ **完成！**「{result.get('title', '')}」· {result.get('duration', 0):.1f} 秒 · 耗時 `{elapsed}s`\n\n"
+        f"\n\n✅ **完成！**「{result.get('title', '')}」· {result.get('duration', 0):.1f} 秒 · 耗時 `{elapsed}s`{note}\n\n"
         f"<video src=\"{video}\" controls style=\"max-width:100%; border-radius:8px;\"></video>\n\n"
         f"🔗 [觀看 / 下載影片]({video})  |  📜 [劇本 JSON（可編輯後重新生成）]({script})"
     )

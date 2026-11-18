@@ -88,6 +88,7 @@ class AnimationGenerateResponse(BaseModel):
     success: bool = True
     message: str = "Success"
     output_id: Optional[str] = Field(None, description="Output folder name (task directory) on the server")
+    image_fallback_used: bool = Field(False, description="True if some scenes used the fallback image model")
     video_url: str
     duration: float
     file_size: int

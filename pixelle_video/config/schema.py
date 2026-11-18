@@ -16,6 +16,7 @@ Configuration schema with Pydantic models
 Single source of truth for all configuration defaults and validation.
 """
 from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -55,6 +56,16 @@ class CloudflareProviderConfig(BaseModel):
     use_proxy: bool = Field(default=False, description="Route provider requests through common local proxy")
 
 
+class LocalSDProviderConfig(BaseModel):
+    """Local stable-diffusion.cpp (sd-cli) settings; empty sd_dir disables it"""
+    sd_dir: str = Field(default="", description="Directory containing sd-cli, its libraries and model files")
+    binary: str = Field(default="sd-cli", description="sd-cli executable name inside sd_dir")
+    taesd: str = Field(default="taesd_full.safetensors", description="TAESD decoder file (fast decode); empty to disable")
+    threads: int = Field(default=4, ge=1, le=64, description="CPU threads for sd-cli")
+    long_side: int = Field(default=896, ge=256, le=2048, description="Generation size of the longest side")
+    timeout: int = Field(default=600, ge=30, description="Seconds before an image generation is aborted")
+
+
 class APIProvidersConfig(BaseModel):
     """Direct model provider API configuration"""
     common: APIProviderCommonConfig = Field(default_factory=APIProviderCommonConfig)
@@ -65,6 +76,7 @@ class APIProvidersConfig(BaseModel):
     ark: APIKeyProviderConfig = Field(default_factory=APIKeyProviderConfig)
     kling: AccessSecretProviderConfig = Field(default_factory=AccessSecretProviderConfig)
     cloudflare: CloudflareProviderConfig = Field(default_factory=CloudflareProviderConfig)
+    local_sd: LocalSDProviderConfig = Field(default_factory=LocalSDProviderConfig)
 
 
 class TTSLocalConfig(BaseModel):

@@ -18,6 +18,7 @@ Animation generation endpoints.
 - POST /animation/generate/async  create a background task (poll /tasks/{id})
 """
 
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -69,8 +70,15 @@ async def _run(pixelle_video, body: AnimationGenerateRequest, request: Request, 
         text=body.text, pipeline="animation", progress_callback=progress_callback, **_build_params(body)
     )
     script_path = Path(result.video_path).parent / "animation_script.json"
+    fallback_used = False
+    if script_path.exists():
+        try:
+            fallback_used = bool(json.loads(script_path.read_text(encoding="utf-8")).get("image_fallback_used"))
+        except ValueError:
+            pass
     return {
         "output_id": Path(result.video_path).parent.name,
+        "image_fallback_used": fallback_used,
         "video_url": path_to_url(request, result.video_path),
         "duration": result.duration,
         "file_size": result.file_size,

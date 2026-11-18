@@ -22,6 +22,15 @@ api_providers:
   common:
     print_model_input: false
     local_proxy: ""
+  # Local stable-diffusion.cpp: used automatically when Cloudflare's daily allowance runs out
+  # (~1 min per image on 4 vCPUs). Set sd_dir to "" to disable the fallback.
+  local_sd:
+    sd_dir: ${PIXELLE_LOCAL_SD_DIR:-/data/workspace/sd}
+    binary: sd-cli
+    taesd: taesd_full.safetensors
+    threads: 4
+    long_side: 896
+    timeout: 600
   cloudflare:
     account_id: ${CLOUDFLARE_ACCOUNT_ID}
     api_token: ${CLOUDFLARE_API_TOKEN}

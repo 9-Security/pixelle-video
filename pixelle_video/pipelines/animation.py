@@ -36,7 +36,7 @@ import os
 import re
 import threading
 from pathlib import Path
-from typing import Awaitable, Callable, List
+from typing import Awaitable, Callable, List, Optional
 
 from loguru import logger
 from PIL import Image
@@ -531,21 +531,64 @@ class AnimationPipeline(StandardPipeline):
             frame.media_type = "image"
         await self.core.frame_processor._step_compose_frame(frame, ctx.storyboard, config)
 
-    async def _generate_scene_image(self, ctx: PipelineContext, frame: StoryboardFrame):
-        """Text-to-image for one scene; failures become SceneMediaError (scene + prompt)."""
+    LOCAL_WORKFLOW_PREFIX = "api/local_sd/"
+    DEFAULT_LOCAL_FALLBACK = "api/local_sd/dreamshaper-8-lcm"
+
+    def _fallback_workflow(self, ctx: PipelineContext) -> Optional[str]:
+        """
+        Image workflow to switch to when the primary provider's daily allowance is used up.
+
+        `fallback_media_workflow` param wins (None/"" disables); otherwise local SD when configured.
+        """
+        if "fallback_media_workflow" in ctx.params:
+            return ctx.params["fallback_media_workflow"] or None
+        from pixelle_video.config import config_manager
+
+        if config_manager.get_api_providers_config().get("local_sd", {}).get("sd_dir"):
+            return self.DEFAULT_LOCAL_FALLBACK
+        return None
+
+    async def _media_call(self, ctx: PipelineContext, frame: StoryboardFrame, workflow: str):
+        """One image request; local CPU workflows run one at a time."""
         config = ctx.config
+        kwargs = dict(
+            prompt=frame.image_prompt, workflow=workflow, media_type="image",
+            width=config.media_width, height=config.media_height,
+            output_path=get_task_frame_path(config.task_id, frame.index, "image"), index=frame.index + 1,
+        )
+        if (workflow or "").startswith(self.LOCAL_WORKFLOW_PREFIX):
+            slot = ctx.extras.setdefault("local_image_slot", asyncio.Semaphore(1))
+            async with slot:
+                return await self.core.media(**kwargs)
+        return await self.core.media(**kwargs)
+
+    async def _generate_scene_image(self, ctx: PipelineContext, frame: StoryboardFrame):
+        """
+        Text-to-image for one scene; failures become SceneMediaError (scene + prompt).
+
+        If the primary provider reports that its daily allowance is used up, this and
+        all later scenes switch to the fallback workflow (local SD by default). Safety
+        rejections never trigger the fallback.
+        """
+        config = ctx.config
+        workflow = ctx.extras.get("active_media_workflow") or config.media_workflow
+        used = workflow
         try:
-            result = await self.core.media(
-                prompt=frame.image_prompt,
-                workflow=config.media_workflow,
-                media_type="image",
-                width=config.media_width,
-                height=config.media_height,
-                output_path=get_task_frame_path(config.task_id, frame.index, "image"),
-                index=frame.index + 1,
-            )
+            result = await self._media_call(ctx, frame, workflow)
         except Exception as e:
-            raise SceneMediaError(frame.index, frame.image_prompt, e, ctx.extras.get("script_path")) from e
+            fallback = self._fallback_workflow(ctx)
+            if not (_is_quota_exhausted(e) and fallback and fallback != workflow):
+                raise SceneMediaError(frame.index, frame.image_prompt, e, ctx.extras.get("script_path")) from e
+            if ctx.extras.get("active_media_workflow") != fallback:
+                ctx.extras["active_media_workflow"] = fallback
+                logger.warning(f"Image quota used up on {workflow}; switching remaining scenes to {fallback}")
+            try:
+                result = await self._media_call(ctx, frame, fallback)
+                used = fallback
+            except Exception as fallback_error:
+                raise SceneMediaError(frame.index, frame.image_prompt, fallback_error,
+                                      ctx.extras.get("script_path")) from fallback_error
+        ctx.extras.setdefault("image_workflows", {})[frame.index] = used
         if not result.is_image:
             raise RuntimeError(
                 "Camera/parallax motion needs an image workflow, but the workflow returned "
@@ -675,6 +718,9 @@ class AnimationPipeline(StandardPipeline):
                 "motion_mode": ctx.params.get("motion_mode"),
                 "camera_motions": [m.value for m in ctx.extras.get("camera_motions", [])],
                 "ambient_effects": ctx.extras.get("ambient_effects", []),
+                "image_workflows": [ctx.extras.get("image_workflows", {}).get(i)
+                                    for i in range(len(ctx.image_prompts or []))],
+                "image_fallback_used": bool(ctx.extras.get("active_media_workflow")),
                 "scene_prompts": ctx.image_prompts,
             }
             path = Path(ctx.task_dir) / "animation_script.json"

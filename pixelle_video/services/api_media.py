@@ -36,6 +36,10 @@ class APIProviderMediaService:
             "sdxl-base-1.0",
             "dreamshaper-8-lcm",
         ],
+        "local_sd": [
+            "dreamshaper-8-lcm",
+            "sd-turbo",
+        ],
         "seedream": [
             "doubao-seedream-5-0-260128",
             "doubao-seedream-4-5-251128",
@@ -484,6 +488,10 @@ class APIProviderMediaService:
         image_paths: Optional[list[str]] = None,
         **params,
     ) -> MediaResult:
+        if provider == "local_sd":
+            return await self._generate_local_sd_image(
+                model=model, prompt=prompt, width=width, height=height, output_path=output_path, **params,
+            )
         if provider == "cloudflare":
             return await self._generate_cloudflare_image(
                 model=model, prompt=prompt, width=width, height=height,
@@ -518,6 +526,32 @@ class APIProviderMediaService:
             result_path = output_path
 
         return MediaResult(media_type="image", url=result_path)
+
+    async def _generate_local_sd_image(
+        self,
+        model: str,
+        prompt: str,
+        width: Optional[int],
+        height: Optional[int],
+        output_path: Optional[str],
+        **params,
+    ) -> MediaResult:
+        """Text-to-image with local stable-diffusion.cpp (CPU, no quota)."""
+        from pixelle_video.services.api_services.image_sdcpp import LocalSDError, SdCppImageClient
+
+        cfg = config_manager.get_api_providers_config().get("local_sd", {})
+        if not cfg.get("sd_dir"):
+            raise LocalSDError("Local SD is not configured (api_providers.local_sd.sd_dir is empty)")
+        client = SdCppImageClient(
+            sd_dir=cfg["sd_dir"], binary=cfg.get("binary") or "sd-cli", taesd=cfg.get("taesd") or None,
+            threads=cfg.get("threads") or 4, long_side=cfg.get("long_side") or 896, timeout=cfg.get("timeout") or 600,
+        )
+        target = output_path or os.path.join(self._save_dir(None, "api_images"), f"local_sd_{uuid.uuid4().hex[:8]}.png")
+        path = await asyncio.to_thread(
+            client.generate_image, prompt, target, model, width, height,
+            params.get("seed"), params.get("negative_prompt"),
+        )
+        return MediaResult(media_type="image", url=path)
 
     async def _generate_cloudflare_image(
         self,

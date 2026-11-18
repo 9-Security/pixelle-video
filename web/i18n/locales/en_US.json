@@ -570,6 +570,7 @@
     "animation.scene_blocked": "Scene {scene}'s prompt was rejected by the image model's safety filter (possibly a false positive). The prompt:",
     "animation.scene_failed": "Scene {scene}'s image could not be generated. The prompt:",
     "animation.scene_failed.fix": "The script was saved. Download it, edit that scene's visual or the character appearance, then upload it under \"Use an edited script\" and generate again. You can also pick another image model.",
-    "animation.quota_exhausted": "The image provider's daily free allowance is used up (stopped at scene {scene}); it resets daily. Regenerate later with the saved script, or choose another image model."
+    "animation.quota_exhausted": "The image provider's daily free allowance is used up (stopped at scene {scene}); it resets daily. Regenerate later with the saved script, or choose another image model.",
+    "animation.fallback_used": "The image provider's daily allowance ran out, so some scenes were generated with the local model (slower; style may differ slightly)."
   }
 }

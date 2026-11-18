@@ -401,7 +401,13 @@ class AnimationPipelineUI(PipelineUI):
                 with open(result.video_path, "rb") as f:
                     st.download_button("⬇️ Download", f.read(), file_name=os.path.basename(result.video_path),
                                        mime="video/mp4", use_container_width=True, key=f"{KEY}download")
-            self._render_script(Path(result.video_path).parent / "animation_script.json")
+            script_file = Path(result.video_path).parent / "animation_script.json"
+            try:
+                if json.loads(script_file.read_text(encoding="utf-8")).get("image_fallback_used"):
+                    st.info(tr("animation.fallback_used"))
+            except (OSError, ValueError):
+                pass
+            self._render_script(script_file)
 
     @staticmethod
     def _render_failure(error: Exception):
